@@ -1,0 +1,21 @@
+{
+    "name": "PatchParity.Harness",
+    "rootNamespace": "PatchParity.Harness",
+    "references": [
+        "xpTURN.Polyfill.Runtime",
+        "xpTURN.Klotho.Logging",
+        "xpTURN.Klotho.Runtime",
+        "xpTURN.Klotho.Gameplay",
+        "Brawler.ECS",
+        "Brawler.DataAssets"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}
