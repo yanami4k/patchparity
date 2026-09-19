@@ -1,0 +1,1 @@
+OK ticks=600 seed=42 lastHash=2872171476002274282 csv=<run-dir>/hashes.csv
