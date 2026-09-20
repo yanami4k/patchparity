@@ -1,0 +1,27 @@
+diff --git a/Samples/Brawler/Assets/PatchParity/Bootstrap/PatchParity.Bootstrap.asmdef b/Samples/Brawler/Assets/PatchParity/Bootstrap/PatchParity.Bootstrap.asmdef
+--- a/Samples/Brawler/Assets/PatchParity/Bootstrap/PatchParity.Bootstrap.asmdef
++++ b/Samples/Brawler/Assets/PatchParity/Bootstrap/PatchParity.Bootstrap.asmdef
+@@ -2,7 +2,8 @@
+     "name": "PatchParity.Bootstrap",
+     "rootNamespace": "PatchParity.Bootstrap",
+     "references": [
+-        "HybridCLR.Runtime"
++        "HybridCLR.Runtime",
++        "Brawler.ECS"
+     ],
+     "includePlatforms": [],
+     "excludePlatforms": [],
+diff --git a/Samples/Brawler/Assets/PatchParity/Bootstrap/VerifyBootstrap.cs b/Samples/Brawler/Assets/PatchParity/Bootstrap/VerifyBootstrap.cs
+--- a/Samples/Brawler/Assets/PatchParity/Bootstrap/VerifyBootstrap.cs
++++ b/Samples/Brawler/Assets/PatchParity/Bootstrap/VerifyBootstrap.cs
+@@ -11,6 +11,10 @@ namespace PatchParity.Bootstrap
+ {
+     public sealed class VerifyBootstrap : MonoBehaviour
+     {
++        // 本用例刻意违反单向依赖约束：母包侧的 MonoBehaviour 持有热更侧的类型。
++        // 仅写 using 不会在程序集里留下引用，必须实际使用该类型才构成依赖。
++        [SerializeField] private Brawler.ItemComponent _hotUpdateType;
++
+         // 默认加载清单，顺序为被依赖者在前。可由 -patchparityDllList 覆盖，
+         // 母包发布后不可更新，故热更组成变化不应要求重打母包。
+         //

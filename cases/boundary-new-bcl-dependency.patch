@@ -1,0 +1,15 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+@@ -43,7 +43,10 @@ namespace Brawler
+             while (filter.Next(out var entity))
+             {
+                 ref var item = ref frame.Get<ItemComponent>(entity);
+-                item.RemainingTicks--;
++                // 补丁引入了母包中可能已被裁剪的 BCL 类型：热更侧新增的依赖，
++                // 母包打包时没人用过，裁剪器便不会保留它。
++                int step = System.Text.RegularExpressions.Regex.IsMatch("1", "^[0-9]$") ? 1 : 2;
++                item.RemainingTicks -= step;
+                 if (item.RemainingTicks <= 0)
+                     frame.DestroyEntity(entity);
+             }
