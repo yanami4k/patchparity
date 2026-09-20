@@ -36,9 +36,11 @@
 | 路径 | 所属 | 作用 |
 |---|---|---|
 | `Bootstrap/VerifyBootstrap.cs` | 母包（AOT） | 加载热更 dll，反射调用 harness 入口，写结果并退出。不得引用任何热更程序集 |
-| `Harness/VerifyEntry.cs` | 热更侧 | 构造引擎与模拟、注册玩法系统、初始化世界，逐 tick 输出状态哈希 CSV |
+| `Harness/VerifyEntry.cs` | 热更侧 | 构造引擎与模拟、启动世界、按种子派生输入序列，逐 tick 输出分层状态哈希 |
+| `Harness/HarnessNetworkService.cs` | 热更侧 | 离线网络服务：给定玩家名单与世界随机种子（引擎默认取墙上时钟，必须显式覆盖） |
 | `Editor/PatchParityVerifyBuild.cs` | 编辑器 | 配置热更清单、生成验证场景、跑 HybridCLR 生成流程、构建验证包、复制热更 dll |
 | `Editor/PatchParityHotUpdate.cs` | 编辑器 | 单独的热更配置与生成入口，便于分步排查 |
+| `Editor/PatchParityPatch.cs` | 编辑器 | 补丁路径的唯一动作：只重编热更程序集并替换进已有母包旁的目录 |
 | `Editor/PatchParityHybridClr.cs` | 编辑器 | HybridCLR 状态查询与安装入口 |
 | `Editor/PatchParityBuild.cs` | 编辑器 | 完整游戏的整包构建入口，用于测量基线耗时 |
 | `Scenes/Verify.unity` | 验证场景 | 由构建脚本生成，仅含一个挂载 VerifyBootstrap 的对象 |
@@ -48,3 +50,5 @@
 - 编辑器脚本一律通过反射调用 HybridCLR 的 API，避免包未就绪时本程序集编译失败。
 - 涉及编译与构建的调用必须经 `EditorApplication.delayCall` 延迟执行，详见 docs/路线图.md 的命令行注意事项。
 - `.meta` 文件未入库，Unity 会重新生成；若需要稳定的资产 GUID，后续再决定是否一并入库。
+- 母包启动器与热更 harness 之间的契约是 `Run(string csvPath, string options)`，options 为 `k=v;k=v` 形式。
+  母包发布后不可更新，故场景参数一律经该字符串转发、由热更侧解析，新增参数不需要重打母包。

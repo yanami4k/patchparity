@@ -56,7 +56,7 @@ namespace PatchParity.EditorTools
                     report.Add("PrebuildCommand.GenerateAll=ok");
                 }
 
-                string output = ReadArg("-patchparityOutput") ?? "PatchParityArtifacts/verify";
+                string output = ReadArg("-patchparityOutput") ?? Path.Combine(DefaultOutputDir, "verify");
 
                 // HybridCLR 的生成流程内部会以"生成 VS 解决方案"的方式构建一次，
                 // 留下的产物与正式构建的选项不一致时，Unity 会拒绝构建
@@ -91,6 +91,7 @@ namespace PatchParity.EditorTools
                 if (buildReport.summary.result == BuildResult.Succeeded)
                 {
                     CopyHotUpdateDlls(output, report);
+                    CopyAotMetadataDlls(output, report);
                 }
 
                 Finish(report, buildReport.summary.result == BuildResult.Succeeded ? 0 : 4);
@@ -155,15 +156,65 @@ namespace PatchParity.EditorTools
             }
         }
 
+        // 需要补充元数据的 AOT 程序集：母包里的泛型方法若以热更类型实例化，
+        // 在母包中并不存在对应代码，必须由解释器按裁剪前的元数据执行。
+        // 清单由 HybridCLR 生成流程写进 AOTGenericReferences.PatchedAOTAssemblyList，此处解析该文件，
+        // 避免手工维护与生成结果脱节。
+        private static void CopyAotMetadataDlls(string output, List<string> report)
+        {
+            string refsPath = Path.Combine(Directory.GetCurrentDirectory(), "Assets", "HybridCLRGenerate", "AOTGenericReferences.cs");
+            if (!File.Exists(refsPath))
+            {
+                report.Add("WARN 未找到 AOTGenericReferences.cs，跳过 AOT 元数据复制");
+                return;
+            }
+
+            var names = new List<string>();
+            bool inList = false;
+            foreach (string line in File.ReadAllLines(refsPath))
+            {
+                if (line.Contains("PatchedAOTAssemblyList"))
+                {
+                    inList = true;
+                    continue;
+                }
+                if (!inList) continue;
+                if (line.Contains("};")) break;
+                int a = line.IndexOf('"');
+                int b = line.LastIndexOf('"');
+                if (a >= 0 && b > a) names.Add(line.Substring(a + 1, b - a - 1));
+            }
+
+            string src = Path.Combine(Directory.GetCurrentDirectory(), "HybridCLRData", "AssembliesPostIl2CppStrip", "StandaloneWindows64");
+            string dst = Path.Combine(output, "AotDlls");
+            Directory.CreateDirectory(dst);
+            foreach (string name in names)
+            {
+                string from = Path.Combine(src, name);
+                if (!File.Exists(from))
+                {
+                    report.Add("WARN AOT 元数据 dll 缺失: " + name);
+                    continue;
+                }
+                File.Copy(from, Path.Combine(dst, name), overwrite: true);
+            }
+            report.Add("aotMetadata=" + string.Join(",", names));
+        }
+
         private static void Finish(List<string> report, int exitCode)
         {
             string text = string.Join("\n", report);
             UnityEngine.Debug.Log("[patchparity][verify-build]\n" + text);
-            string dir = ReadArg("-patchparityOutput") ?? "PatchParityArtifacts/verify";
+            string dir = ReadArg("-patchparityOutput") ?? Path.Combine(DefaultOutputDir, "verify");
             Directory.CreateDirectory(dir);
             File.WriteAllText(Path.Combine(dir, "verify-build.txt"), text + "\n");
             EditorApplication.Exit(exitCode);
         }
+
+        // 默认输出目录相对 Unity 工程，避免把本机路径写进代码；
+        // 流水线一律显式传 -patchparityOutput。
+        private static string DefaultOutputDir =>
+            Path.Combine(Directory.GetCurrentDirectory(), "PatchParityArtifacts");
 
         private static string ReadArg(string name)
         {

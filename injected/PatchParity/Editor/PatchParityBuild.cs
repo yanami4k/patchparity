@@ -16,7 +16,7 @@ namespace PatchParity.EditorTools
         //         -patchparityOutput <输出目录>
         public static void BuildWindowsIl2cpp()
         {
-            string output = ReadArg("-patchparityOutput") ?? Path.Combine("PatchParityArtifacts", "baseline");
+            string output = ReadArg("-patchparityOutput") ?? Path.Combine(DefaultOutputDir, "baseline");
             Directory.CreateDirectory(output);
 
             var group = NamedBuildTarget.Standalone;
@@ -59,6 +59,11 @@ namespace PatchParity.EditorTools
 
             EditorApplication.Exit(summary.result == BuildResult.Succeeded ? 0 : 4);
         }
+
+        // 默认输出目录相对 Unity 工程，避免把本机路径写进代码；
+        // 流水线一律显式传 -patchparityOutput。
+        private static string DefaultOutputDir =>
+            Path.Combine(Directory.GetCurrentDirectory(), "PatchParityArtifacts");
 
         private static string ReadArg(string name)
         {

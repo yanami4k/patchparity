@@ -136,11 +136,16 @@ namespace PatchParity.EditorTools
         {
             string text = string.Join("\n", report);
             UnityEngine.Debug.Log("[patchparity][hotupdate]\n" + text);
-            string dir = ReadArg("-patchparityOutput") ?? "PatchParityArtifacts";
+            string dir = ReadArg("-patchparityOutput") ?? DefaultOutputDir;
             Directory.CreateDirectory(dir);
             File.WriteAllText(Path.Combine(dir, fileName), text + "\n");
             EditorApplication.Exit(exitCode);
         }
+
+        // 默认输出目录相对 Unity 工程，避免把本机路径写进代码；
+        // 流水线一律显式传 -patchparityOutput。
+        private static string DefaultOutputDir =>
+            Path.Combine(Directory.GetCurrentDirectory(), "PatchParityArtifacts");
 
         private static string ReadArg(string name)
         {

@@ -1,7 +1,9 @@
 {
     "name": "PatchParity.Bootstrap",
     "rootNamespace": "PatchParity.Bootstrap",
-    "references": [],
+    "references": [
+        "HybridCLR.Runtime"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

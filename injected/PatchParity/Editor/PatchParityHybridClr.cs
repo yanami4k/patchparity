@@ -85,10 +85,15 @@ namespace PatchParity.EditorTools
 
         private static void WriteReport(string fileName, string content)
         {
-            string dir = ReadArg("-patchparityOutput") ?? "PatchParityArtifacts";
+            string dir = ReadArg("-patchparityOutput") ?? DefaultOutputDir;
             Directory.CreateDirectory(dir);
             File.WriteAllText(Path.Combine(dir, fileName), content + "\n");
         }
+
+        // 默认输出目录相对 Unity 工程，避免把本机路径写进代码；
+        // 流水线一律显式传 -patchparityOutput。
+        private static string DefaultOutputDir =>
+            Path.Combine(Directory.GetCurrentDirectory(), "PatchParityArtifacts");
 
         private static string ReadArg(string name)
         {
