@@ -26,3 +26,11 @@ artifacts/
 # 文档与笔记只在本地维护，不入库
 docs/
 notes/
+
+# .NET 生成物（补充）
+[Bb]in/
+[Oo]bj/
+
+# 本工程自己的项目文件不受 Unity 生成物规则影响
+!src/**/*.csproj
+!tests/**/*.csproj
