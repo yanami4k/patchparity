@@ -98,7 +98,10 @@ public static class FailureClassifier
     /// <summary>依据构建日志判断构建期失败。</summary>
     public static FailureReport ClassifyBuild(string buildLog)
     {
-        if (buildLog.Contains("Failed to resolve assembly", StringComparison.Ordinal))
+        // 两个特征都指向同一根因：裁剪阶段解析不到热更程序集。
+        // 前者出现在 Unity 日志里，后者出现在构建脚本写出的报告里，后者更早可得。
+        if (buildLog.Contains("Failed to resolve assembly", StringComparison.Ordinal) ||
+            buildLog.Contains("GenerateStripedAOTDlls failed", StringComparison.Ordinal))
         {
             return new FailureReport
             {

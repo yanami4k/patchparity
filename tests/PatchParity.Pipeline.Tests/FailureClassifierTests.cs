@@ -72,6 +72,17 @@ public class FailureClassifierTests
     }
 
     [Fact]
+    public void 识别生成裁剪后AOT程序集失败()
+    {
+        // 母包侧 MonoBehaviour 持有热更类型时，构建脚本报告里出现的就是这一行
+        FailureReport report = FailureClassifier.ClassifyBuild(
+            "ERROR Exception: GenerateStripedAOTDlls failed at StripAOTDllCommand.GenerateStripedAOTDlls");
+
+        Assert.Equal(FailureStage.Build, report.Stage);
+        Assert.Equal(KnownFault.AotReferencesHotUpdate, report.Fault);
+    }
+
+    [Fact]
     public void 构建日志无已知模式时不报失败()
     {
         FailureReport report = FailureClassifier.ClassifyBuild("Build succeeded\n");
