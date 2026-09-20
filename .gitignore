@@ -22,3 +22,7 @@ obj/
 # 运行产物
 artifacts/
 *.log
+
+# 文档与笔记只在本地维护，不入库
+docs/
+notes/
