@@ -23,6 +23,9 @@ public sealed record VerificationReport
     public required Scenario Scenario { get; init; }
     public IReadOnlyList<StepResult> Steps { get; init; } = Array.Empty<StepResult>();
     public ComparisonResult? Comparison { get; init; }
+
+    /// <summary>母包基线的缓存键与是否命中。裁决要求键的组成随报告打印。</summary>
+    public CacheLookup? Baseline { get; init; }
     public DeterminismCheck? Determinism { get; init; }
     public CoverageCheck? Coverage { get; init; }
     public FailureReport? Failure { get; init; }
@@ -56,28 +59,54 @@ public sealed class VerificationPlan
     public TimeSpan RunTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// 母包基线是否已就绪且对应改动前的源码。为真时跳过基线构建，
-    /// 这是内容哈希缓存的接入点——同一基线可服务大量用例。
+    /// 母包基线的缓存。命中则跳过基线构建——基线对全部用例是同一个，建一次即可反复使用。
+    /// 为空时每次都重建基线。
     /// </summary>
-    public bool ReuseBaselinePackage { get; init; }
+    public BaselineCache? Cache { get; init; }
+
+    /// <summary>计算母包基线缓存键所需的输入。缺省时不启用缓存。</summary>
+    public Func<CacheKey>? BaselineKey { get; init; }
 
     public VerificationReport Verify(ChangeCase change)
     {
         var steps = new List<StepResult>();
         string baselineDir = Path.Combine(_paths.ArtifactRoot, "baseline-package");
+        CacheLookup? baselineLookup = null;
         string rebuildDir = Path.Combine(_paths.ArtifactRoot, "rebuild-package");
 
         try
         {
             // 一、母包基线：改动必须未施加
             _patch.Revert(change);
-            if (!ReuseBaselinePackage)
+
+            CacheLookup? lookup;
+            if (Cache is not null && BaselineKey is not null)
+            {
+                lookup = Cache.Lookup(BaselineKey());
+                baselineDir = lookup.PackageDirectory;
+                baselineLookup = lookup;
+            }
+            else
+            {
+                lookup = null;
+            }
+
+            if (lookup is not { Hit: true })
             {
                 StepResult baseline = _unity.BuildPlayer(baselineDir, BuildTimeout, "baseline-build");
                 steps.Add(baseline);
                 if (!baseline.Succeeded)
                 {
+                    // 构建失败会留下不完整的目录，必须撤销标记，否则下次会命中一个不可用的母包
+                    if (lookup is not null)
+                    {
+                        Cache!.Invalidate(lookup.Key);
+                    }
                     return Failed(change, steps, baseline.Failure, "母包基线构建失败，无从验证");
+                }
+                if (lookup is not null)
+                {
+                    Cache!.MarkComplete(lookup.Key);
                 }
             }
 
@@ -118,6 +147,7 @@ public sealed class VerificationPlan
                     CaseName = change.Name,
                     Scenario = change.Scenario,
                     Steps = steps,
+                    Baseline = baselineLookup,
                     Determinism = determinism,
                     Reason = $"确定性自检不通过：同一场景两次运行在 tick {determinism.FirstDivergentTick} 起不同，比对结果作废",
                 };
@@ -133,6 +163,7 @@ public sealed class VerificationPlan
                     CaseName = change.Name,
                     Scenario = change.Scenario,
                     Steps = steps,
+                    Baseline = baselineLookup,
                     Determinism = determinism,
                     Coverage = coverage,
                     Reason = "覆盖自检不通过：" + coverage.Reason,
@@ -164,6 +195,7 @@ public sealed class VerificationPlan
                 CaseName = change.Name,
                 Scenario = change.Scenario,
                 Steps = steps,
+                Baseline = baselineLookup,
                 Comparison = comparison,
                 Determinism = determinism,
                 Coverage = coverage,

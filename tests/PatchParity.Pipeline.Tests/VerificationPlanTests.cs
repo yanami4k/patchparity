@@ -29,7 +29,13 @@ public class VerificationPlanTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private VerificationPlan Plan(FakeLauncher launcher, bool reuseBaseline = false)
+    private static readonly CacheKey FixedKey = new()
+    {
+        Value = "abc123",
+        Composition = new[] { new CacheKeyInput("源码目录 Assets", "deadbeef") },
+    };
+
+    private VerificationPlan Plan(FakeLauncher launcher, BaselineCache? cache = null)
     {
         var paths = new ToolPaths
         {
@@ -40,7 +46,8 @@ public class VerificationPlanTests : IDisposable
         Directory.CreateDirectory(_root);
         return new VerificationPlan(paths, new UnityInvoker(paths, launcher), _patch)
         {
-            ReuseBaselinePackage = reuseBaseline,
+            Cache = cache,
+            BaselineKey = cache is null ? null : () => FixedKey,
         };
     }
 
@@ -83,17 +90,52 @@ public class VerificationPlanTests : IDisposable
     }
 
     [Fact]
-    public void 复用母包基线时跳过基线构建()
+    public void 命中缓存时跳过基线构建()
     {
+        var cache = new BaselineCache(Path.Combine(_root, "cache"));
+        cache.MarkComplete(FixedKey);
         var launcher = new FakeLauncher(_root)
             .BuildSucceeds()
             .CompileSucceeds()
             .RunSucceeds(LiveWorld);
 
-        VerificationReport report = Plan(launcher, reuseBaseline: true).Verify(Case());
+        VerificationReport report = Plan(launcher, cache).Verify(Case());
 
         Assert.DoesNotContain("baseline-build", report.Steps.Select(s => s.Step));
+        Assert.True(report.Baseline!.Hit);
         Assert.Equal(Verdict.Equivalent, report.Verdict);
+    }
+
+    [Fact]
+    public void 未命中缓存时构建基线并在成功后标记可复用()
+    {
+        var cache = new BaselineCache(Path.Combine(_root, "cache"));
+        var launcher = new FakeLauncher(_root)
+            .BuildSucceeds()
+            .CompileSucceeds()
+            .RunSucceeds(LiveWorld);
+
+        VerificationReport report = Plan(launcher, cache).Verify(Case());
+
+        Assert.Contains("baseline-build", report.Steps.Select(s => s.Step));
+        Assert.False(report.Baseline!.Hit);
+        Assert.True(cache.Lookup(FixedKey).Hit);
+    }
+
+    [Fact]
+    public void 基线构建失败时不留下可命中的缓存()
+    {
+        // 失败会留下不完整的目录，若被标记为可用，下一个用例会在一个残缺母包上得出结论
+        var cache = new BaselineCache(Path.Combine(_root, "cache"));
+        cache.MarkComplete(FixedKey);
+        var launcher = new FakeLauncher(_root).BuildFails();
+
+        // 让缓存先命中失效：模拟源码已变、键仍相同的极端情形由 Invalidate 兜底
+        cache.Invalidate(FixedKey);
+        VerificationReport report = Plan(launcher, cache).Verify(Case());
+
+        Assert.Equal(Verdict.PatchFailed, report.Verdict);
+        Assert.False(cache.Lookup(FixedKey).Hit);
     }
 
     [Fact]
