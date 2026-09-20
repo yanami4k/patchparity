@@ -32,6 +32,7 @@ public static class Program
                 "compare" => Compare(args),
                 "determinism" => Determinism(args),
                 "coverage" => Coverage(args),
+                "verify" => VerifyCommand.Run(args),
                 _ => Unknown(args[0]),
             };
         }
@@ -162,6 +163,7 @@ public static class Program
               patchparity compare <左.csv> <右.csv> [触及的组件,逗号分隔]
               patchparity determinism <第一次.csv> <第二次.csv>
               patchparity coverage <哈希.csv> [触及的组件,逗号分隔]
+              patchparity verify --unity ... --project ... --case ...   完整验证一个改动
 
             退出码: 0 通过 / 3 不一致 / 4 自检不通过 / 2 用法错误 / 9 异常
             """);
