@@ -1,0 +1,12 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+@@ -43,7 +43,7 @@ namespace Brawler
+             while (filter.Next(out var entity))
+             {
+                 ref var item = ref frame.Get<ItemComponent>(entity);
+-                item.RemainingTicks--;
++                item.RemainingTicks -= 2;
+                 if (item.RemainingTicks <= 0)
+                     frame.DestroyEntity(entity);
+             }
