@@ -43,6 +43,10 @@ public class DispatcherTests : IDisposable
 
     public void Dispose()
     {
+        // 与会话结束走同一条路径：放开被卡住的任务，等后台任务全部结束并撤销改动，再清理目录
+        _unity.Hold?.Set();
+        _tools.RevertAll();
+
         if (Directory.Exists(_root))
         {
             Directory.Delete(_root, recursive: true);
@@ -71,6 +75,28 @@ public class DispatcherTests : IDisposable
 
     private static bool IsError(JsonNode result) => result["isError"]!.GetValue<bool>();
 
+    /// <summary>启动一个后台任务，再用 wait_job 反复等待直到完成，返回完成时的结果。</summary>
+    private JsonNode RunJob(string tool, JsonObject arguments)
+    {
+        JsonNode started = Call(tool, arguments);
+        if (IsError(started))
+        {
+            return started;
+        }
+        Assert.Equal("running", Structured(started, "status"));
+        string jobId = Structured(started, "job_id");
+
+        for (int i = 0; i < 20; i++)
+        {
+            JsonNode waited = Call("wait_job", new JsonObject { ["job_id"] = jobId, ["max_wait_seconds"] = 5 });
+            if (Structured(waited, "status") != "running")
+            {
+                return waited;
+            }
+        }
+        throw new TimeoutException("后台任务未在预期内完成: " + jobId);
+    }
+
     private static string Structured(JsonNode result, string key) =>
         result["structuredContent"]![key]!.GetValue<string>();
 
@@ -95,7 +121,7 @@ public class DispatcherTests : IDisposable
     }
 
     [Fact]
-    public void 工具清单为六个且标注是否只读()
+    public void 工具清单为七个且标注是否只读()
     {
         JsonObject? response = _dispatcher.Handle(Request("tools/list"));
 
@@ -105,10 +131,14 @@ public class DispatcherTests : IDisposable
             .First(t => t!["name"]!.GetValue<string>() == name)!["annotations"]!["readOnlyHint"]!.GetValue<bool>();
 
         Assert.Equal(
-            new HashSet<string> { "list_scenarios", "build_package", "build_patch", "revert_patch", "run_scenario", "compare_runs" },
+            new HashSet<string>
+            {
+                "list_scenarios", "build_package", "build_patch", "revert_patch", "run_scenario", "wait_job", "compare_runs",
+            },
             names);
         Assert.True(ReadOnly("list_scenarios"));
         Assert.True(ReadOnly("compare_runs"));
+        Assert.True(ReadOnly("wait_job"));
         Assert.False(ReadOnly("build_package"));
         Assert.False(ReadOnly("build_patch"));
         Assert.False(ReadOnly("revert_patch"));
@@ -136,30 +166,30 @@ public class DispatcherTests : IDisposable
     public void 完整流程按真实顺序走得通并判为等价()
     {
         // 一、母包基线：改动施加前构建
-        string baseline = Structured(Call("build_package", new JsonObject()), "package");
+        string baseline = Structured(RunJob("build_package", new JsonObject()), "package");
 
         // 二、补丁：施加改动，只重编热更程序集
-        Assert.False(IsError(Call("build_patch", new JsonObject
+        Assert.False(IsError(RunJob("build_patch", new JsonObject
         {
             ["patch_path"] = "cases/x.patch",
             ["patch_name"] = "x",
         })));
 
         // 三、母包加补丁跑两次（第二次用于确定性自检）
-        Assert.False(IsError(Call("run_scenario", new JsonObject
+        Assert.False(IsError(RunJob("run_scenario", new JsonObject
         {
             ["package"] = baseline, ["patch_name"] = "x", ["run_name"] = "patch-1",
         })));
-        Assert.False(IsError(Call("run_scenario", new JsonObject
+        Assert.False(IsError(RunJob("run_scenario", new JsonObject
         {
             ["package"] = baseline, ["patch_name"] = "x", ["run_name"] = "patch-2",
         })));
 
         // 四、整包重编：改动仍处于施加状态，再构建一次得到另一个包
-        string rebuild = Structured(Call("build_package", new JsonObject()), "package");
+        string rebuild = Structured(RunJob("build_package", new JsonObject()), "package");
         Assert.NotEqual(baseline, rebuild);
 
-        Assert.False(IsError(Call("run_scenario", new JsonObject
+        Assert.False(IsError(RunJob("run_scenario", new JsonObject
         {
             ["package"] = rebuild, ["run_name"] = "rebuild",
         })));
@@ -184,8 +214,8 @@ public class DispatcherTests : IDisposable
     public void 补丁编译不写入任何缓存中的包()
     {
         // 缓存里的包内容必须与其键一致；补丁若写进母包基线，缓存条目就被污染了
-        string baseline = Structured(Call("build_package", new JsonObject()), "package");
-        Call("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+        string baseline = Structured(RunJob("build_package", new JsonObject()), "package");
+        RunJob("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
 
         string cacheRoot = Path.Combine(_root, "cache");
         Assert.NotEmpty(_unity.CompileTargets);
@@ -197,9 +227,9 @@ public class DispatcherTests : IDisposable
     [Fact]
     public void 带补丁运行时从补丁目录加载热更程序集()
     {
-        string baseline = Structured(Call("build_package", new JsonObject()), "package");
-        Call("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
-        Call("run_scenario", new JsonObject { ["package"] = baseline, ["patch_name"] = "x", ["run_name"] = "r" });
+        string baseline = Structured(RunJob("build_package", new JsonObject()), "package");
+        RunJob("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+        RunJob("run_scenario", new JsonObject { ["package"] = baseline, ["patch_name"] = "x", ["run_name"] = "r" });
 
         string dlls = _unity.RunDllDirs.Last();
         Assert.Contains(Path.Combine("patches", "x"), dlls);
@@ -208,7 +238,7 @@ public class DispatcherTests : IDisposable
     [Fact]
     public void 会话结束时兜底撤销未撤销的改动()
     {
-        Call("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+        RunJob("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
         Assert.True(_patch.Applied);
 
         IReadOnlyList<string> failures = _tools.RevertAll();
@@ -223,10 +253,92 @@ public class DispatcherTests : IDisposable
     {
         _unity.CompileFails = true;
 
-        JsonNode result = Call("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+        JsonNode result = RunJob("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
 
         Assert.True(IsError(result));
         Assert.Contains("cases/x.patch", _tools.AppliedPatches);
+    }
+
+    // ── 后台任务 ───────────────────────────────────────────
+    // MCP 客户端普遍对单次请求设 60 秒上限，整包构建要十余分钟，启动 Unity 的工具必须立即返回
+
+    [Fact]
+    public void 启动构建立即返回任务号而不等构建完成()
+    {
+        _unity.Hold = new ManualResetEventSlim(false);
+
+        JsonNode started = Call("build_package", new JsonObject());
+
+        Assert.False(IsError(started));
+        Assert.Equal("running", Structured(started, "status"));
+        Assert.StartsWith("job-", Structured(started, "job_id"));
+        _unity.Hold.Set();
+    }
+
+    [Fact]
+    public void 任务未完成时等待返回running()
+    {
+        _unity.Hold = new ManualResetEventSlim(false);
+        string jobId = Structured(Call("build_package", new JsonObject()), "job_id");
+
+        JsonNode waited = Call("wait_job", new JsonObject { ["job_id"] = jobId, ["max_wait_seconds"] = 1 });
+
+        Assert.False(IsError(waited));
+        Assert.Equal("running", Structured(waited, "status"));
+        _unity.Hold.Set();
+    }
+
+    [Fact]
+    public void 任务完成后等待交回完整结果()
+    {
+        JsonNode done = RunJob("build_package", new JsonObject());
+
+        Assert.Equal("succeeded", Structured(done, "status"));
+        Assert.False(string.IsNullOrEmpty(Structured(done, "package")));
+        Assert.NotNull(done["structuredContent"]!["evidence"]);
+    }
+
+    [Fact]
+    public void 同一时刻只允许一个会改动工程的任务()
+    {
+        // 同一个 Unity 工程目录同时只能开一个 Unity；撞上即拒绝，不排队
+        _unity.Hold = new ManualResetEventSlim(false);
+        Call("build_package", new JsonObject());
+
+        JsonNode second = Call("build_patch", new JsonObject { ["patch_path"] = "p", ["patch_name"] = "x" });
+
+        Assert.True(IsError(second));
+        Assert.Contains("wait_job", second["content"]![0]!["text"]!.GetValue<string>());
+        _unity.Hold.Set();
+    }
+
+    [Fact]
+    public void 任务运行中拒绝撤销改动()
+    {
+        _unity.Hold = new ManualResetEventSlim(false);
+        Call("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+
+        JsonNode revert = Call("revert_patch", new JsonObject { ["patch_path"] = "cases/x.patch" });
+
+        Assert.True(IsError(revert));
+        _unity.Hold.Set();
+    }
+
+    [Fact]
+    public void 未知任务号被拒绝()
+    {
+        Assert.True(IsError(Call("wait_job", new JsonObject { ["job_id"] = "job-999-none" })));
+    }
+
+    [Fact]
+    public void 后台异常作为工具失败交回()
+    {
+        _unity.ThrowOnLaunch = true;
+
+        JsonNode done = RunJob("build_package", new JsonObject());
+
+        Assert.Equal("failed", Structured(done, "status"));
+        Assert.True(IsError(done));
     }
 
     // ── 入参校验 ───────────────────────────────────────────
@@ -234,7 +346,7 @@ public class DispatcherTests : IDisposable
     [Fact]
     public void 在未构建的包上运行被拒绝()
     {
-        JsonNode result = Call("run_scenario", new JsonObject { ["package"] = "nosuchpackage", ["run_name"] = "r" });
+        JsonNode result = RunJob("run_scenario", new JsonObject { ["package"] = "nosuchpackage", ["run_name"] = "r" });
 
         Assert.True(IsError(result));
         Assert.Contains("build_package", result["content"]![0]!["text"]!.GetValue<string>());
@@ -243,9 +355,9 @@ public class DispatcherTests : IDisposable
     [Fact]
     public void 引用不存在的补丁被拒绝()
     {
-        string baseline = Structured(Call("build_package", new JsonObject()), "package");
+        string baseline = Structured(RunJob("build_package", new JsonObject()), "package");
 
-        JsonNode result = Call("run_scenario", new JsonObject
+        JsonNode result = RunJob("run_scenario", new JsonObject
         {
             ["package"] = baseline, ["patch_name"] = "missing", ["run_name"] = "r",
         });
@@ -259,22 +371,22 @@ public class DispatcherTests : IDisposable
     [InlineData("a\\b")]
     public void 能跳出产物目录的名字被拒绝(string name)
     {
-        Assert.True(IsError(Call("build_patch", new JsonObject { ["patch_path"] = "p", ["patch_name"] = name })));
+        Assert.True(IsError(RunJob("build_patch", new JsonObject { ["patch_path"] = "p", ["patch_name"] = name })));
         Assert.True(IsError(Call("compare_runs", new JsonObject { ["left"] = name, ["right"] = "b" })));
     }
 
     [Fact]
     public void 能跳出缓存目录的包标识被拒绝()
     {
-        Assert.True(IsError(Call("run_scenario", new JsonObject { ["package"] = "..", ["run_name"] = "r" })));
+        Assert.True(IsError(RunJob("run_scenario", new JsonObject { ["package"] = "..", ["run_name"] = "r" })));
     }
 
     [Fact]
     public void 未知场景名被拒绝()
     {
-        string baseline = Structured(Call("build_package", new JsonObject()), "package");
+        string baseline = Structured(RunJob("build_package", new JsonObject()), "package");
 
-        Assert.True(IsError(Call("run_scenario", new JsonObject
+        Assert.True(IsError(RunJob("run_scenario", new JsonObject
         {
             ["package"] = baseline, ["run_name"] = "r", ["scenario"] = "不存在的场景",
         })));
@@ -367,11 +479,20 @@ public class DispatcherTests : IDisposable
         public BaselineCache? Cache { get; set; }
         public string PatchedKey { get; set; } = "";
         public bool CompileFails { get; set; }
+
+        /// <summary>设置后，等待产物时先卡在这里，用于检验"立即返回"与互斥。</summary>
+        public ManualResetEventSlim? Hold { get; set; }
+
+        public bool ThrowOnLaunch { get; set; }
         public List<string> CompileTargets { get; } = new();
         public List<string> RunDllDirs { get; } = new();
 
         public void LaunchDetached(string executable, IReadOnlyList<string> arguments)
         {
+            if (ThrowOnLaunch)
+            {
+                throw new InvalidOperationException("模拟的启动失败");
+            }
             if (executable.EndsWith("Verify.exe", StringComparison.Ordinal))
             {
                 string dlls = ValueOf(arguments, "-patchparityDlls")!;
@@ -410,7 +531,11 @@ public class DispatcherTests : IDisposable
             }
         }
 
-        public bool WaitForArtifact(string artifactPath, TimeSpan timeout) => File.Exists(artifactPath);
+        public bool WaitForArtifact(string artifactPath, TimeSpan timeout)
+        {
+            Hold?.Wait(TimeSpan.FromSeconds(15));
+            return File.Exists(artifactPath);
+        }
 
         private static string? ValueOf(IReadOnlyList<string> arguments, string name)
         {

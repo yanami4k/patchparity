@@ -18,7 +18,7 @@ public sealed record ToolSpec
 }
 
 /// <summary>
-/// 六个工具，粒度为一步一个。刻意不提供"一键验证"——编排由调用方按顺序组合，
+/// 七个工具，粒度为一步一个。刻意不提供"一键验证"——编排由调用方按顺序组合，
 /// 每一步的产物与耗时都单独可见，失败时也能看出停在哪一步。
 ///
 /// 工具之间以显式标识衔接：包以内容哈希键标识，补丁以名字标识，运行以名字标识。
@@ -26,6 +26,9 @@ public sealed record ToolSpec
 ///
 /// 包与补丁分离：包是整包构建的产物，进缓存后不可变；补丁只是一个装着重编热更程序集的目录。
 /// "母包加补丁"在运行时组合，不向包内写入任何东西。
+///
+/// 启动 Unity 的工具（build_package、build_patch、run_scenario）先同步校验入参，通过后在后台运行并立即返回任务号，
+/// 由 wait_job 分次等待。MCP 客户端普遍对单次请求设 60 秒上限，而整包构建要十余分钟。
 /// </summary>
 public sealed class Tools
 {
@@ -37,6 +40,11 @@ public sealed class Tools
 
     // 本会话施加过、尚未撤销的改动。会话结束时兜底撤销，避免把被测样例的源码留在改过的状态
     private readonly Dictionary<string, ChangeCase> _applied = new(StringComparer.Ordinal);
+
+    private readonly Jobs _jobs = new();
+
+    /// <summary>wait_job 单次等待的上限，须低于客户端的请求超时。</summary>
+    public const int MaxWaitSeconds = 50;
 
     public Tools(ToolPaths paths, UnityInvoker unity, IPatchSource patch, BaselineCache cache, Func<CacheKey> packageKey)
     {
@@ -52,7 +60,16 @@ public sealed class Tools
     public TimeSpan RunTimeout { get; init; } = TimeSpan.FromMinutes(10);
 
     /// <summary>尚未撤销的改动，供测试与会话收尾检查。</summary>
-    public IReadOnlyCollection<string> AppliedPatches => _applied.Keys;
+    public IReadOnlyCollection<string> AppliedPatches
+    {
+        get
+        {
+            lock (_applied)
+            {
+                return _applied.Keys.ToArray();
+            }
+        }
+    }
 
     /// <summary>预置场景。场景是验证的输入，不由调用方随意拼装，便于结果可比。</summary>
     public static readonly IReadOnlyDictionary<string, Scenario> Scenarios = new Dictionary<string, Scenario>
@@ -78,7 +95,8 @@ public sealed class Tools
             Name = "build_package",
             Description =
                 "对当前源码做一次整包构建，返回包标识（内容哈希键）。命中缓存时直接复用。" +
-                "施加改动前调用得母包基线，施加改动后调用得整包重编。",
+                "施加改动前调用得母包基线，施加改动后调用得整包重编。" +
+                "后台运行：立即返回任务号，用 wait_job 取结果，未命中缓存时约需十余分钟。",
             ReadOnly = false,
             InputSchema = Schema(new JsonObject()),
         },
@@ -87,7 +105,7 @@ public sealed class Tools
             Name = "build_patch",
             Description =
                 "施加改动用例，只重编热更程序集，产物存为一个补丁。不做整包构建，不改动任何已构建的包。" +
-                "改动在调用 revert_patch 前保持施加状态。",
+                "改动在调用 revert_patch 前保持施加状态。后台运行：立即返回任务号，用 wait_job 取结果。",
             ReadOnly = false,
             InputSchema = Schema(new JsonObject
             {
@@ -110,7 +128,8 @@ public sealed class Tools
             Name = "run_scenario",
             Description =
                 "在指定的包上跑一个场景，产出逐 tick 分层哈希，并给出覆盖信号。" +
-                "给出 patch_name 时从该补丁加载热更程序集，即\"母包加补丁\"；不给则运行包自身。",
+                "给出 patch_name 时从该补丁加载热更程序集，即\"母包加补丁\"；不给则运行包自身。" +
+                "后台运行：立即返回任务号，用 wait_job 取结果。",
             ReadOnly = false,
             InputSchema = Schema(new JsonObject
             {
@@ -119,6 +138,19 @@ public sealed class Tools
                 ["scenario"] = Property("string", "场景名，取自 list_scenarios，缺省 default"),
                 ["run_name"] = Property("string", "本次运行的名字，compare_runs 以此引用"),
             }, "package", "run_name"),
+        },
+        new ToolSpec
+        {
+            Name = "wait_job",
+            Description =
+                "等待一个后台任务，至多等待 max_wait_seconds 秒（上限 50）。" +
+                "返回 running 时再次调用；返回 succeeded 或 failed 时附带该任务的完整结果与证据。",
+            ReadOnly = true,
+            InputSchema = Schema(new JsonObject
+            {
+                ["job_id"] = Property("string", "任务号，取自启动任务的工具的返回"),
+                ["max_wait_seconds"] = Property("integer", "本次至多等待的秒数，缺省且上限为 50"),
+            }, "job_id"),
         },
         new ToolSpec
         {
@@ -139,10 +171,11 @@ public sealed class Tools
     public ToolResult Invoke(string name, JsonElement arguments) => name switch
     {
         "list_scenarios" => ListScenarios(),
-        "build_package" => BuildPackage(),
+        "build_package" => StartJob("build_package", BuildPackage),
         "build_patch" => BuildPatch(arguments),
         "revert_patch" => RevertPatch(arguments),
         "run_scenario" => RunScenario(arguments),
+        "wait_job" => WaitJob(arguments),
         "compare_runs" => CompareRuns(arguments),
         _ => ToolResult.Failure("未知工具: " + name),
     };
@@ -150,13 +183,24 @@ public sealed class Tools
     /// <summary>撤销本会话施加过的全部改动。会话结束时调用；单个撤销失败不影响其余。</summary>
     public IReadOnlyList<string> RevertAll()
     {
+        // 编译任务还在读写源码时撤销改动会得到半截状态，故先等后台任务结束
+        _jobs.WaitAll(BuildTimeout + CompileTimeout);
+
         var failures = new List<string>();
-        foreach (ChangeCase change in _applied.Values.ToList())
+        List<ChangeCase> applied;
+        lock (_applied)
+        {
+            applied = _applied.Values.ToList();
+        }
+        foreach (ChangeCase change in applied)
         {
             try
             {
                 _patch.Revert(change);
-                _applied.Remove(change.PatchPath);
+                lock (_applied)
+                {
+                    _applied.Remove(change.PatchPath);
+                }
             }
             catch (Exception e)
             {
@@ -259,8 +303,16 @@ public sealed class Tools
             Expected = ExpectedVerdict.Boundary,
         };
 
+        return StartJob("build_patch", () => CompilePatch(change, patchName));
+    }
+
+    private ToolResult CompilePatch(ChangeCase change, string patchName)
+    {
         _patch.Apply(change);
-        _applied[patchPath] = change;
+        lock (_applied)
+        {
+            _applied[change.PatchPath] = change;
+        }
 
         StepResult step = _unity.CompileHotUpdate(PatchDirectory(patchName), CompileTimeout, "patch-" + patchName);
 
@@ -296,12 +348,24 @@ public sealed class Tools
             return ToolResult.Failure("缺少 patch_path");
         }
 
-        var change = _applied.TryGetValue(patchPath, out ChangeCase? known)
-            ? known
-            : new ChangeCase { Name = "revert", PatchPath = patchPath, Expected = ExpectedVerdict.Boundary };
+        if (_jobs.RunningExclusive is { } running)
+        {
+            return ToolResult.Failure($"任务 {running} 仍在运行，此时撤销改动会得到半截状态。请先用 wait_job 等它结束。");
+        }
+
+        ChangeCase change;
+        lock (_applied)
+        {
+            change = _applied.TryGetValue(patchPath, out ChangeCase? known)
+                ? known
+                : new ChangeCase { Name = "revert", PatchPath = patchPath, Expected = ExpectedVerdict.Boundary };
+        }
 
         _patch.Revert(change);
-        _applied.Remove(patchPath);
+        lock (_applied)
+        {
+            _applied.Remove(patchPath);
+        }
 
         return new ToolResult
         {
@@ -357,6 +421,15 @@ public sealed class Tools
             }
         }
 
+        string capturedPatch = hotUpdateDir is null ? "" : patchName;
+        return StartJob("run_scenario",
+            () => ExecuteRun(package, packageDir, runName, scenarioName, scenario, capturedPatch, hotUpdateDir));
+    }
+
+    private ToolResult ExecuteRun(
+        string package, string packageDir, string runName, string scenarioName, Scenario scenario,
+        string patchName, string? hotUpdateDir)
+    {
         RunResult run = _unity.RunScenario(
             packageDir, RunDirectory(runName), scenario, RunTimeout, "run-" + runName, hotUpdateDir);
 
@@ -394,6 +467,78 @@ public sealed class Tools
                 ["seconds"] = Math.Round(run.Elapsed.TotalSeconds, 1),
             },
             Evidence = run.Report,
+        };
+    }
+
+    private ToolResult StartJob(string tool, Func<ToolResult> work)
+    {
+        string? id = _jobs.TryStartExclusive(tool, work, out string? blockedBy);
+        if (id is null)
+        {
+            return ToolResult.Failure(
+                $"任务 {blockedBy} 仍在运行，同一时刻只允许一个会改动工程的任务。请先用 wait_job 等它结束。");
+        }
+
+        return new ToolResult
+        {
+            Ok = true,
+            Text = $"任务 {id} 已在后台启动。请调用 wait_job（job_id={id}）取结果，" +
+                   $"每次至多等待 {MaxWaitSeconds} 秒，返回 running 就再次调用。",
+            Structured = new JsonObject { ["job_id"] = id, ["status"] = "running", ["tool"] = tool },
+        };
+    }
+
+    private ToolResult WaitJob(JsonElement arguments)
+    {
+        if (!TryGetString(arguments, "job_id", out string id))
+        {
+            return ToolResult.Failure("缺少 job_id");
+        }
+
+        int seconds = MaxWaitSeconds;
+        if (arguments.ValueKind == JsonValueKind.Object &&
+            arguments.TryGetProperty("max_wait_seconds", out JsonElement waitElement) &&
+            waitElement.ValueKind == JsonValueKind.Number &&
+            waitElement.TryGetInt32(out int requested))
+        {
+            seconds = Math.Clamp(requested, 1, MaxWaitSeconds);
+        }
+
+        JobSnapshot? snapshot = _jobs.Wait(id, TimeSpan.FromSeconds(seconds));
+        if (snapshot is null)
+        {
+            return ToolResult.Failure("未知任务号: " + id);
+        }
+
+        double elapsed = Math.Round(snapshot.Elapsed.TotalSeconds, 1);
+        if (!snapshot.Completed)
+        {
+            return new ToolResult
+            {
+                Ok = true,
+                Text = $"任务 {id} 仍在运行，已用 {elapsed} 秒。请再次调用 wait_job。",
+                Structured = new JsonObject
+                {
+                    ["job_id"] = id,
+                    ["tool"] = snapshot.Tool,
+                    ["status"] = "running",
+                    ["elapsed_seconds"] = elapsed,
+                },
+            };
+        }
+
+        // 完成：原样交回该任务的结果与证据，附上任务信息
+        ToolResult result = snapshot.Result!;
+        var structured = result.Structured is null ? new JsonObject() : (JsonObject)result.Structured.DeepClone();
+        structured["job_id"] = id;
+        structured["tool"] = snapshot.Tool;
+        structured["status"] = result.Ok ? "succeeded" : "failed";
+        structured["elapsed_seconds"] = elapsed;
+
+        return result with
+        {
+            Text = $"任务 {id}（{snapshot.Tool}）已完成，用时 {elapsed} 秒。\n" + result.Text,
+            Structured = structured,
         };
     }
 
