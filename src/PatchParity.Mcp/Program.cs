@@ -36,13 +36,32 @@ public static class Program
             new UnityInvoker(paths, new ProcessLauncher()),
             new GitPatchSource(config.Repository),
             new BaselineCache(config.Cache),
-            () => BuildBaselineKey(config));
+            () => BuildPackageKey(config));
 
         var dispatcher = new McpDispatcher(tools);
 
         var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
         using var input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
 
+        try
+        {
+            Serve(dispatcher, input, output);
+        }
+        finally
+        {
+            // 会话结束（输入流关闭或异常退出）时兜底撤销本会话施加过的改动，
+            // 避免把被测样例的源码留在改过的状态，影响下一个会话或下一个用例
+            foreach (string failure in tools.RevertAll())
+            {
+                Console.Error.WriteLine("会话结束时撤销改动失败: " + failure);
+            }
+        }
+
+        return 0;
+    }
+
+    private static void Serve(McpDispatcher dispatcher, StreamReader input, StreamWriter output)
+    {
         while (input.ReadLine() is { } line)
         {
             if (line.Length == 0)
@@ -66,14 +85,13 @@ public static class Program
                 output.WriteLine(response.ToJsonString());
             }
         }
-
-        return 0;
     }
 
     /// <summary>
-    /// 母包基线的缓存键。源码取被测工程的 Assets，另加影响构建结果的外部输入。
+    /// 包的缓存键，按当前源码计算。源码取被测工程的 Assets，另加影响构建结果的外部输入。
+    /// 施加改动前后各算一次即得母包基线与整包重编两个不同的键。
     /// </summary>
-    private static CacheKey BuildBaselineKey(Config config) =>
+    private static CacheKey BuildPackageKey(Config config) =>
         CacheKeyBuilder.ForBaseline(
             new[] { Path.Combine(config.Project, "Assets") },
             new Dictionary<string, string>

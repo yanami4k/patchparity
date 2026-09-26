@@ -16,7 +16,22 @@ public sealed class BaselineCache
     public BaselineCache(string root) => _root = root;
 
     /// <summary>缓存中该键对应的目录，无论是否已存在。</summary>
-    public string DirectoryFor(CacheKey key) => Path.Combine(_root, key.Value);
+    public string DirectoryFor(CacheKey key) => DirectoryFor(key.Value);
+
+    /// <summary>按键值定位。调用方只持有键值字符串时使用，例如跨工具调用传递的包标识。</summary>
+    public string DirectoryFor(string keyValue)
+    {
+        // 键值来自调用方，拒绝任何能跳出缓存根目录的写法
+        if (keyValue.Length == 0 || keyValue.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+            keyValue.Contains("..", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("非法的包标识: " + keyValue);
+        }
+        return Path.Combine(_root, keyValue);
+    }
+
+    /// <summary>按键值判断该包是否已完整构建。</summary>
+    public bool IsComplete(string keyValue) => File.Exists(MarkerPath(DirectoryFor(keyValue)));
 
     /// <summary>
     /// 查缓存。以完成标记文件判命中，而不是以目录存在判——

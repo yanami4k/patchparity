@@ -123,6 +123,40 @@ public class VerificationPlanTests : IDisposable
     }
 
     [Fact]
+    public void 补丁编译不写入缓存中的母包基线()
+    {
+        // 缓存里的包内容必须与其键一致；补丁若写进母包基线，下一个命中缓存的用例就会用到被改过的"基线"
+        var cache = new BaselineCache(Path.Combine(_root, "cache"));
+        var launcher = new FakeLauncher(_root)
+            .BuildSucceeds()
+            .CompileSucceeds()
+            .RunSucceeds(LiveWorld);
+
+        Plan(launcher, cache).Verify(Case());
+
+        string cacheRoot = Path.GetFullPath(Path.Combine(_root, "cache"));
+        Assert.NotEmpty(launcher.CompileTargets);
+        Assert.All(launcher.CompileTargets, t =>
+            Assert.False(Path.GetFullPath(t).StartsWith(cacheRoot, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
+    public void 补丁路径的运行从补丁目录加载热更程序集()
+    {
+        var launcher = new FakeLauncher(_root)
+            .BuildSucceeds()
+            .CompileSucceeds()
+            .RunSucceeds(LiveWorld);
+
+        Plan(launcher).Verify(Case());
+
+        // 前两次运行是母包加补丁，最后一次是整包重编，用包自身的热更程序集
+        Assert.Contains("patch-sample", launcher.RunDllDirs[0]);
+        Assert.Contains("patch-sample", launcher.RunDllDirs[1]);
+        Assert.DoesNotContain("patch-sample", launcher.RunDllDirs[^1]);
+    }
+
+    [Fact]
     public void 基线构建失败时不留下可命中的缓存()
     {
         // 失败会留下不完整的目录，若被标记为可用，下一个用例会在一个残缺母包上得出结论
@@ -249,6 +283,9 @@ public class VerificationPlanTests : IDisposable
         private bool _compileOk;
         private string? _runFailure;
 
+        public List<string> CompileTargets { get; } = new();
+        public List<string> RunDllDirs { get; } = new();
+
         public FakeLauncher(string root) => _root = root;
 
         public FakeLauncher BuildSucceeds() { _buildOk = true; return this; }
@@ -294,6 +331,7 @@ public class VerificationPlanTests : IDisposable
             }
             else if (method.Contains("CompileHotUpdate", StringComparison.Ordinal))
             {
+                CompileTargets.Add(ValueOf(arguments, "-patchparityTarget")!);
                 string output = ValueOf(arguments, "-patchparityOutput")!;
                 Directory.CreateDirectory(output);
                 File.WriteAllText(
@@ -304,6 +342,7 @@ public class VerificationPlanTests : IDisposable
 
         private void WriteRun(IReadOnlyList<string> arguments)
         {
+            RunDllDirs.Add(ValueOf(arguments, "-patchparityDlls")!);
             string resultPath = ValueOf(arguments, "-patchparityResult")!;
             string csvPath = ValueOf(arguments, "-patchparityCsv")!;
             Directory.CreateDirectory(Path.GetDirectoryName(resultPath)!);

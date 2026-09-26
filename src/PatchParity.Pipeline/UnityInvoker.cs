@@ -85,8 +85,11 @@ public sealed class UnityInvoker
         };
     }
 
-    /// <summary>只重编热更程序集并替换进已有母包，这是补丁路径的全部动作。</summary>
-    public StepResult CompileHotUpdate(string targetPackageDir, TimeSpan timeout, string stepName = "patch-compile")
+    /// <summary>
+    /// 只重编热更程序集，产物写进 patchDir 下的 HotUpdateDlls，这是补丁路径的全部动作。
+    /// patchDir 不得是缓存中的包目录：写进去会使缓存条目的内容与其键不再一致。
+    /// </summary>
+    public StepResult CompileHotUpdate(string patchDir, TimeSpan timeout, string stepName = "patch-compile")
     {
         string artifact = Path.Combine(_paths.ArtifactRoot, "patch-compile.txt");
         string log = Path.Combine(_paths.ArtifactRoot, stepName + ".log");
@@ -99,7 +102,7 @@ public sealed class UnityInvoker
             "-batchmode", "-nographics", "-accept-apiupdate",
             "-projectPath", _paths.ProjectPath,
             "-executeMethod", "PatchParity.EditorTools.PatchParityPatch.CompileHotUpdate",
-            "-patchparityTarget", targetPackageDir,
+            "-patchparityTarget", patchDir,
             "-patchparityOutput", _paths.ArtifactRoot,
             "-logFile", log,
         });
@@ -130,8 +133,14 @@ public sealed class UnityInvoker
         };
     }
 
-    /// <summary>运行验证包，产出逐 tick 分层哈希。</summary>
-    public RunResult RunScenario(string packageDir, string runDir, Scenario scenario, TimeSpan timeout, string stepName = "run")
+    /// <summary>
+    /// 运行验证包，产出逐 tick 分层哈希。
+    /// hotUpdateDir 为补丁目录：给定时从该目录加载热更程序集，可执行文件与 AOT 元数据仍取自包本身。
+    /// 这样"母包加补丁"无需改动包——缓存里的包内容必须与其键一致，不得被补丁写入。
+    /// </summary>
+    public RunResult RunScenario(
+        string packageDir, string runDir, Scenario scenario, TimeSpan timeout,
+        string stepName = "run", string? hotUpdateDir = null)
     {
         string resultPath = Path.Combine(runDir, "result.txt");
         string csvPath = Path.Combine(runDir, "hashes.csv");
@@ -146,7 +155,7 @@ public sealed class UnityInvoker
             "-batchmode", "-nographics",
             "-patchparityResult", resultPath,
             "-patchparityCsv", csvPath,
-            "-patchparityDlls", Path.Combine(packageDir, "HotUpdateDlls"),
+            "-patchparityDlls", hotUpdateDir ?? Path.Combine(packageDir, "HotUpdateDlls"),
             "-patchparityAotDlls", Path.Combine(packageDir, "AotDlls"),
             "-patchparityScenario", scenario.ToOptionString(),
         });

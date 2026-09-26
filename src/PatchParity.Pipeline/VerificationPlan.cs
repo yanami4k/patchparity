@@ -112,7 +112,10 @@ public sealed class VerificationPlan
 
             // 二、补丁路径：施加改动，只重编热更程序集并换进母包基线
             _patch.Apply(change);
-            StepResult compile = _unity.CompileHotUpdate(baselineDir, CompileTimeout, "patch-compile");
+            // 补丁编译进独立目录，不写入母包基线——缓存中的包必须保持与其键一致
+            string patchDir = Path.Combine(_paths.ArtifactRoot, "patch-" + change.Name);
+            string patchDlls = Path.Combine(patchDir, "HotUpdateDlls");
+            StepResult compile = _unity.CompileHotUpdate(patchDir, CompileTimeout, "patch-compile");
             steps.Add(compile);
             if (!compile.Succeeded)
             {
@@ -120,7 +123,7 @@ public sealed class VerificationPlan
             }
 
             RunResult patchRun = _unity.RunScenario(
-                baselineDir, Path.Combine(_paths.ArtifactRoot, "run-patch"), change.Scenario, RunTimeout, "patch-run");
+                baselineDir, Path.Combine(_paths.ArtifactRoot, "run-patch"), change.Scenario, RunTimeout, "patch-run", patchDlls);
             steps.Add(patchRun);
             if (!patchRun.Succeeded)
             {
@@ -129,7 +132,7 @@ public sealed class VerificationPlan
 
             // 三、确定性自检：同一包同一场景再跑一次，必须逐帧一致
             RunResult patchRunAgain = _unity.RunScenario(
-                baselineDir, Path.Combine(_paths.ArtifactRoot, "run-patch-2"), change.Scenario, RunTimeout, "patch-run-repeat");
+                baselineDir, Path.Combine(_paths.ArtifactRoot, "run-patch-2"), change.Scenario, RunTimeout, "patch-run-repeat", patchDlls);
             steps.Add(patchRunAgain);
             if (!patchRunAgain.Succeeded)
             {
