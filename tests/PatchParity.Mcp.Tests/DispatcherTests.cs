@@ -14,6 +14,7 @@ public class DispatcherTests : IDisposable
     private readonly Tools _tools;
     private readonly McpDispatcher _dispatcher;
     private readonly WorkspaceLease _lease;
+    private string LedgerPath => Path.Combine(_root, "worktree", CaseLedger.FileName);
 
     private const string Header = "tick,total,c:Item:count,c:Item:hash";
     private const string BaselineCsv = Header + "\n0,1,1,10\n1,2,1,20\n";
@@ -39,7 +40,8 @@ public class DispatcherTests : IDisposable
                 Value = _patch.Applied ? "patched0000" : "baseline000",
                 Composition = new[] { new CacheKeyInput("源码", _patch.Applied ? "p" : "b") },
             },
-            _lease);
+            _lease,
+            new CaseLedger(Path.Combine(_root, "worktree", CaseLedger.FileName)));
         _unity.PatchedKey = "patched0000";
         _dispatcher = new McpDispatcher(_tools);
     }
@@ -212,6 +214,67 @@ public class DispatcherTests : IDisposable
         Assert.False(IsError(Call("revert_patch", new JsonObject { ["patch_path"] = "cases/x.patch" })));
         Assert.False(_patch.Applied);
         Assert.Empty(_tools.AppliedPatches);
+    }
+
+    [Fact]
+    public void 按真实顺序跑完后从台账还原出的判定为等价()
+    {
+        // MCP 一路的判定不采信 Agent，只看服务端记下的事实（裁决 009）
+        string baseline = Structured(RunJob("build_package", new JsonObject()), "package");
+        RunJob("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+        RunJob("run_scenario", new JsonObject { ["package"] = baseline, ["patch_name"] = "x", ["run_name"] = "patch-1" });
+        RunJob("run_scenario", new JsonObject { ["package"] = baseline, ["patch_name"] = "x", ["run_name"] = "patch-2" });
+        string rebuild = Structured(RunJob("build_package", new JsonObject()), "package");
+        RunJob("run_scenario", new JsonObject { ["package"] = rebuild, ["run_name"] = "rebuild" });
+        Call("revert_patch", new JsonObject { ["patch_path"] = "cases/x.patch" });
+
+        IReadOnlyList<LedgerEntry> entries = CaseLedger.Load(LedgerPath);
+        Assert.Equal(
+            new[] { "baseline_build", "patch_compile", "run/patched", "run/patched", "rebuild_build", "run/rebuild" },
+            entries.Select(e => e.RunKind is null ? e.Step : $"{e.Step}/{e.RunKind}"));
+
+        (CaseEvidence evidence, string? inconsistency) = CaseLedger.ToEvidence(entries, new[] { "Item" });
+        Assert.Null(inconsistency);
+        Assert.Equal(Verdict.Equivalent, CaseVerdict.Decide(evidence).Verdict);
+    }
+
+    [Fact]
+    public void 改动未施加时构建的包记为母包基线施加后记为整包重编()
+    {
+        RunJob("build_package", new JsonObject());
+        RunJob("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+        RunJob("build_package", new JsonObject());
+        Call("revert_patch", new JsonObject { ["patch_path"] = "cases/x.patch" });
+        // 撤销之后再构建，又回到母包基线：命中缓存
+        RunJob("build_package", new JsonObject());
+
+        IReadOnlyList<LedgerEntry> entries = CaseLedger.Load(LedgerPath);
+        Assert.Equal(new[] { "baseline_build", "patch_compile", "rebuild_build", "baseline_build" }, entries.Select(e => e.Step));
+        Assert.True(entries[3].CacheHit);
+    }
+
+    [Fact]
+    public void 整包构建失败也记账()
+    {
+        _unity.BuildFails = true;
+
+        RunJob("build_package", new JsonObject());
+
+        LedgerEntry build = Assert.Single(CaseLedger.Load(LedgerPath));
+        Assert.Equal(LedgerSteps.BaselineBuild, build.Step);
+        Assert.False(build.Ok);
+    }
+
+    [Fact]
+    public void 失败的步骤也记账()
+    {
+        _unity.CompileFails = true;
+
+        RunJob("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+
+        LedgerEntry compile = Assert.Single(CaseLedger.Load(LedgerPath));
+        Assert.False(compile.Ok);
+        Assert.Equal("Build", compile.FailureStage);
     }
 
     [Fact]
@@ -592,6 +655,7 @@ public class DispatcherTests : IDisposable
         public BaselineCache? Cache { get; set; }
         public string PatchedKey { get; set; } = "";
         public bool CompileFails { get; set; }
+        public bool BuildFails { get; set; }
 
         /// <summary>设置后，等待产物时先卡在这里，用于检验"立即返回"与互斥。</summary>
         public ManualResetEventSlim? Hold { get; set; }
@@ -626,7 +690,7 @@ public class DispatcherTests : IDisposable
             {
                 string output = ValueOf(arguments, "-patchparityOutput")!;
                 Directory.CreateDirectory(output);
-                File.WriteAllText(Path.Combine(output, "verify-build.txt"), "result=Succeeded\n");
+                File.WriteAllText(Path.Combine(output, "verify-build.txt"), BuildFails ? "result=Failed\n" : "result=Succeeded\n");
             }
             else if (method.Contains("CompileHotUpdate", StringComparison.Ordinal))
             {

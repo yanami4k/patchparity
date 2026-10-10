@@ -19,7 +19,8 @@ param(
 
 . (Join-Path $PSScriptRoot 'common.ps1')
 
-foreach ($required in @($Paths.McpExe, $Paths.UnityExe, $Paths.Project, $Paths.Pigeon)) {
+$cliExe = Join-Path $Paths.CliBin 'patchparity.exe'
+foreach ($required in @($Paths.McpExe, $cliExe, $Paths.UnityExe, $Paths.Project, $Paths.Pigeon)) {
     if (-not (Test-Path $required)) { throw "找不到 $required，请先运行 install-toolchain.ps1 与 prepare-workspace.ps1" }
 }
 
@@ -54,16 +55,21 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 [IO.File]::WriteAllText((Join-Path $out '.mcp.json'), ($launch | ConvertTo-Json -Depth 6), $utf8)
 [IO.File]::WriteAllText((Join-Path $out '.pigeon\mcp.json'), ($governance | ConvertTo-Json -Depth 6), $utf8)
 
+# 题目目录按本机路径现场生成（含改动用例与命令行程序的绝对路径），不入库；判分由其中的 verify.mjs 调 patchparity judge
+$tasks = Join-Path $PatchParityRoot 'eval	asks'
+Invoke-Native 'node' @((Join-Path $PatchParityRoot 'eval\generate-tasks.mjs'), '--cli', $cliExe, '--out', $tasks)
+
 $streamFn = Join-Path $Paths.Pigeon 'local\deepseek-stream-fn.mjs'
 $cli = Join-Path $Paths.Pigeon 'src\cli\index.ts'
 
 Write-Step "输出目录 $out"
 Write-Host '  已写入 .mcp.json 与 .pigeon\mcp.json'
+Write-Host "  题目目录 $tasks（给其下某一道题的目录即只跑那一题）"
 Write-Host ''
 Write-Host '  跑批命令（DEEPSEEK_API_KEY 只设在当前进程，不写进文件）：'
 Write-Host ''
 Write-Host "  `$env:DEEPSEEK_API_KEY = '<你的 key>'"
-Write-Host "  node $cli eval <任务目录> --out $out --runs 1 --conditions none ``"
+Write-Host "  node $cli eval $tasks --out $out --runs 1 --conditions none ``"
 Write-Host "    --skill $(Join-Path $out 'unused-skills') --stream-fn $streamFn ``"
 Write-Host '    --provider deepseek --model deepseek-v4-flash --yolo'
 Write-Host ''

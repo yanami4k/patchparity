@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "safe-item-lifetime",
+      "patch": "safe-item-lifetime.patch",
+      "category": "safe",
+      "touched": ["ItemComponent"],
+      "scenario": "default",
+      "note": "道具寿命每 tick 递减 1 改为递减 2，只触及逻辑层一行"
+    },
+    {
+      "id": "boundary-bcl-regex",
+      "patch": "boundary-new-bcl-dependency.patch",
+      "category": "boundary",
+      "touched": ["ItemComponent"],
+      "scenario": "default",
+      "note": "补丁新增对 System.Text.RegularExpressions.Regex 的依赖。原按危险设计，实测补丁路径照常跑完，改归边界；完整验证的判定待云上实测后填入 measured"
+    },
+    {
+      "id": "danger-aot-refs-hot",
+      "patch": "danger-aot-references-hotupdate.patch",
+      "category": "dangerous",
+      "touched": [],
+      "scenario": "default",
+      "note": "母包侧 MonoBehaviour 持有热更类型的字段，AOT 程序集引用热更程序集；实测构建期失败，GenerateStripedAOTDlls failed"
+    }
+  ]
+}

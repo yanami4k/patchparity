@@ -57,7 +57,12 @@ public sealed class ServerSession : IDisposable
             JournaledPatchSource.ForProject(config.Repository, config.Project),
             new BaselineCache(config.Cache),
             () => CacheKeyBuilder.ForProject(config.Unity, config.Project),
-            lease);
+            lease,
+            // 工作目录那份给验证脚本读：pigeon eval 下它是该题的工作树，判分在服务端关闭之后、删工作树之前。
+            // 会话产物目录那份留档：工作树判完分就删
+            new CaseLedger(
+                Path.Combine(Environment.CurrentDirectory, CaseLedger.FileName),
+                Path.Combine(sessionRoot, CaseLedger.FileName)));
 
         return new ServerSession { Tools = tools, Lease = lease, SessionRoot = sessionRoot, CacheRoot = config.Cache };
     }

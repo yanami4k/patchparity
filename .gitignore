@@ -34,3 +34,6 @@ notes/
 # 本工程自己的项目文件不受 Unity 生成物规则影响
 !src/**/*.csproj
 !tests/**/*.csproj
+
+# pigeon eval 的题目目录在每台主机上由 eval/generate-tasks.mjs 现场生成，含本机绝对路径
+eval/tasks/

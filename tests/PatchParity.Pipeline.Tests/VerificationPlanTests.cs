@@ -90,6 +90,20 @@ public class VerificationPlanTests : IDisposable
     }
 
     [Fact]
+    public void 补丁编译失败即判为补丁失败且不再往下跑()
+    {
+        // 危险改动常在这一步就失败：此时不该再运行场景，更不该做十余分钟的整包重编
+        var launcher = new FakeLauncher(_root)
+            .BuildSucceeds()
+            .RunSucceeds(LiveWorld);
+
+        VerificationReport report = Plan(launcher).Verify(Case());
+
+        Assert.Equal(Verdict.PatchFailed, report.Verdict);
+        Assert.Equal(new[] { "baseline-build", "patch-compile" }, report.Steps.Select(s => s.Step).ToArray());
+    }
+
+    [Fact]
     public void 命中缓存时跳过基线构建()
     {
         var cache = new BaselineCache(Path.Combine(_root, "cache"));

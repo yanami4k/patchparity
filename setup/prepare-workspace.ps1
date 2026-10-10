@@ -86,7 +86,7 @@ Write-Host '  全部改动用例都能施加'
 Write-Step 'patchparity：测试与发布'
 $dotnet = $Paths.DotnetExe
 if (-not $SkipTests) {
-    foreach ($tests in @('tests\PatchParity.Pipeline.Tests', 'tests\PatchParity.Mcp.Tests')) {
+    foreach ($tests in @('tests\PatchParity.Pipeline.Tests', 'tests\PatchParity.Mcp.Tests', 'tests\PatchParity.Cli.Tests')) {
         Invoke-Native $dotnet @('test', (Join-Path $PatchParityRoot $tests), '--nologo', '-v', 'q')
     }
 }

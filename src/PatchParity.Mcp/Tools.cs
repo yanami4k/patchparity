@@ -46,6 +46,12 @@ public sealed class Tools
     // 拿到租约后工作区是否已恢复干净。恢复失败时保持 false，下次调用重试
     private bool _workspaceReady;
 
+    // 每步完成即记账，验证脚本据此判定（见 CaseLedger）
+    private readonly CaseLedger _ledger;
+
+    // 本会话构建过的包各是母包基线还是整包重编：运行时据此标出运行的类别
+    private readonly Dictionary<string, string> _packageKinds = new(StringComparer.Ordinal);
+
     // 本会话施加过、尚未撤销的改动。会话结束时兜底撤销，避免把被测样例的源码留在改过的状态
     private readonly Dictionary<string, ChangeCase> _applied = new(StringComparer.Ordinal);
 
@@ -59,8 +65,9 @@ public sealed class Tools
 
     public Tools(
         ToolPaths paths, UnityInvoker unity, IPatchSource patch, BaselineCache cache, Func<CacheKey> packageKey,
-        WorkspaceLease lease)
+        WorkspaceLease lease, CaseLedger? ledger = null)
     {
+        _ledger = ledger ?? new CaseLedger();
         _paths = paths;
         _unity = unity;
         _patch = patch;
@@ -185,7 +192,12 @@ public sealed class Tools
     public ToolResult Invoke(string name, JsonElement arguments) => name switch
     {
         "list_scenarios" => ListScenarios(),
-        "build_package" => WithLease(() => StartJob("build_package", BuildPackage)),
+        "build_package" => WithLease(() =>
+        {
+            // 构建时有没有施加改动，决定这个包是母包基线还是整包重编；任务独占工程，期间改动状态不会变
+            bool rebuild = AppliedPatches.Count > 0;
+            return StartJob("build_package", () => BuildPackage(rebuild));
+        }),
         "build_patch" => BuildPatch(arguments),
         "revert_patch" => RevertPatch(arguments),
         "run_scenario" => RunScenario(arguments),
@@ -249,13 +261,20 @@ public sealed class Tools
         };
     }
 
-    private ToolResult BuildPackage()
+    private ToolResult BuildPackage(bool rebuild)
     {
         CacheKey key = _packageKey();
         CacheLookup lookup = _cache.Lookup(key);
+        string kind = rebuild ? LedgerSteps.Rebuild : LedgerSteps.Baseline;
+        string ledgerStep = rebuild ? LedgerSteps.RebuildBuild : LedgerSteps.BaselineBuild;
 
         if (lookup.Hit)
         {
+            lock (_packageKinds)
+            {
+                _packageKinds[key.Value] = kind;
+            }
+            _ledger.Record(new LedgerEntry { Step = ledgerStep, Ok = true, Package = key.Value, CacheHit = true });
             return new ToolResult
             {
                 Ok = true,
@@ -269,6 +288,7 @@ public sealed class Tools
         if (!step.Succeeded)
         {
             _cache.Invalidate(key);
+            _ledger.Record(Failed(ledgerStep, step) with { Package = key.Value });
             return new ToolResult
             {
                 Ok = false,
@@ -284,6 +304,14 @@ public sealed class Tools
         }
 
         _cache.MarkComplete(key);
+        lock (_packageKinds)
+        {
+            _packageKinds[key.Value] = kind;
+        }
+        _ledger.Record(new LedgerEntry
+        {
+            Step = ledgerStep, Ok = true, Package = key.Value, Seconds = Seconds(step.Elapsed),
+        });
         return new ToolResult
         {
             Ok = true,
@@ -329,6 +357,9 @@ public sealed class Tools
         }
 
         StepResult step = _unity.CompileHotUpdate(PatchDirectory(patchName), CompileTimeout, "patch-" + patchName);
+        _ledger.Record(step.Succeeded
+            ? new LedgerEntry { Step = LedgerSteps.PatchCompile, Ok = true, PatchName = patchName, Seconds = Seconds(step.Elapsed) }
+            : Failed(LedgerSteps.PatchCompile, step) with { PatchName = patchName });
 
         return step.Succeeded
             ? new ToolResult
@@ -452,6 +483,25 @@ public sealed class Tools
     {
         RunResult run = _unity.RunScenario(
             packageDir, RunDirectory(runName), scenario, RunTimeout, "run-" + runName, hotUpdateDir);
+
+        string runKind;
+        lock (_packageKinds)
+        {
+            runKind = hotUpdateDir is not null ? LedgerSteps.Patched
+                : _packageKinds.TryGetValue(package, out string? kind) ? kind
+                : LedgerSteps.Baseline;
+        }
+        var entry = run.Succeeded
+            ? new LedgerEntry { Step = LedgerSteps.Run, Ok = true, Seconds = Seconds(run.Elapsed), Csv = Path.GetFullPath(run.CsvPath!) }
+            : Failed(LedgerSteps.Run, run);
+        _ledger.Record(entry with
+        {
+            Package = package,
+            PatchName = hotUpdateDir is null ? null : patchName,
+            RunName = runName,
+            Scenario = scenarioName,
+            RunKind = runKind,
+        });
 
         if (!run.Succeeded)
         {
@@ -656,6 +706,18 @@ public sealed class Tools
             Evidence = evidence.ToString(),
         };
     }
+
+    private static LedgerEntry Failed(string step, StepResult result) => new()
+    {
+        Step = step,
+        Ok = false,
+        Seconds = Seconds(result.Elapsed),
+        FailureStage = result.Failure.Stage.ToString(),
+        KnownFault = result.Failure.Fault.ToString(),
+        Message = result.Failure.Message,
+    };
+
+    private static double Seconds(TimeSpan elapsed) => Math.Round(elapsed.TotalSeconds, 1);
 
     private string PatchDirectory(string patchName) => Path.Combine(_paths.ArtifactRoot, "patches", patchName);
 

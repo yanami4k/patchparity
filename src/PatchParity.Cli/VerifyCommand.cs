@@ -64,7 +64,7 @@ public static class VerifyCommand
         VerificationReport report = plan.Verify(change);
         Print(report);
 
-        bool matchesExpectation = Matches(report.Verdict, change.Expected);
+        bool matchesExpectation = CaseVerdict.Matches(report.Verdict, change.Expected);
         Console.WriteLine();
         Console.WriteLine(matchesExpectation ? "与预期相符" : "与预期不符");
         return report.Verdict switch
@@ -132,13 +132,6 @@ public static class VerifyCommand
         }
     }
 
-    private static bool Matches(Verdict verdict, ExpectedVerdict expected) => expected switch
-    {
-        ExpectedVerdict.Safe => verdict == Verdict.Equivalent,
-        ExpectedVerdict.Dangerous => verdict is Verdict.Divergent or Verdict.PatchFailed,
-        // 边界类以实测为准，不判对错
-        _ => true,
-    };
 
     private static string Describe(ExpectedVerdict expected) => expected switch
     {

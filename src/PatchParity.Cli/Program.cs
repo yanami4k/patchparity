@@ -3,7 +3,7 @@ using PatchParity.Pipeline;
 namespace PatchParity.Cli;
 
 /// <summary>
-/// 比对与自检的命令行入口。编排与缓存尚未接入，此处只暴露已实现的纯逻辑部分。
+/// 比对、自检、完整验证与台账判定的命令行入口。
 /// </summary>
 public static class Program
 {
@@ -33,6 +33,7 @@ public static class Program
                 "determinism" => Determinism(args),
                 "coverage" => Coverage(args),
                 "verify" => VerifyCommand.Run(args),
+                "judge" => JudgeCommand.Run(args),
                 _ => Unknown(args[0]),
             };
         }
@@ -164,6 +165,7 @@ public static class Program
               patchparity determinism <第一次.csv> <第二次.csv>
               patchparity coverage <哈希.csv> [触及的组件,逗号分隔]
               patchparity verify --unity ... --project ... --case ...   完整验证一个改动
+              patchparity judge <台账> --expect safe|dangerous|boundary  从 MCP 会话的台账判定一个改动
 
             退出码: 0 通过 / 3 不一致 / 4 自检不通过 / 2 用法错误 / 9 异常
             """);

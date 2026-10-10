@@ -14,6 +14,9 @@ public enum Verdict
 
     /// <summary>前置自检不通过，比对结果作废。</summary>
     Void,
+
+    /// <summary>证据不全：后面的步骤还没做。只出现在从台账还原的验证里，命令行一路总会跑到定论。</summary>
+    Incomplete,
 }
 
 public sealed record VerificationReport
@@ -73,6 +76,15 @@ public sealed class VerificationPlan
         string baselineDir = Path.Combine(_paths.ArtifactRoot, "baseline-package");
         CacheLookup? baselineLookup = null;
         string rebuildDir = Path.Combine(_paths.ArtifactRoot, "rebuild-package");
+        var evidence = new CaseEvidence { TouchedComponents = change.TouchedComponents };
+
+        // 每步之后交给判定规则：第一处失败即定论，不再往下跑。规则本身只在 CaseVerdict 一处
+        VerificationReport? Settled(CaseEvidence e)
+        {
+            evidence = e;
+            CaseDecision decision = CaseVerdict.Decide(e);
+            return decision.Final ? Report(change, steps, baselineLookup, decision) : null;
+        }
 
         try
         {
@@ -95,19 +107,23 @@ public sealed class VerificationPlan
             {
                 StepResult baseline = _unity.BuildPlayer(baselineDir, BuildTimeout, "baseline-build");
                 steps.Add(baseline);
-                if (!baseline.Succeeded)
+                if (!baseline.Succeeded && lookup is not null)
                 {
                     // 构建失败会留下不完整的目录，必须撤销标记，否则下次会命中一个不可用的母包
-                    if (lookup is not null)
-                    {
-                        Cache!.Invalidate(lookup.Key);
-                    }
-                    return Failed(change, steps, baseline.Failure, "母包基线构建失败，无从验证");
+                    Cache!.Invalidate(lookup.Key);
                 }
-                if (lookup is not null)
+                else if (lookup is not null)
                 {
                     Cache!.MarkComplete(lookup.Key);
                 }
+                if (Settled(evidence with { BaselineBuild = baseline, BaselineReady = baseline.Succeeded }) is { } failed)
+                {
+                    return failed;
+                }
+            }
+            else
+            {
+                evidence = evidence with { BaselineReady = true };
             }
 
             // 二、补丁路径：施加改动，只重编热更程序集并换进母包基线
@@ -117,92 +133,41 @@ public sealed class VerificationPlan
             string patchDlls = Path.Combine(patchDir, "HotUpdateDlls");
             StepResult compile = _unity.CompileHotUpdate(patchDir, CompileTimeout, "patch-compile");
             steps.Add(compile);
-            if (!compile.Succeeded)
+            if (Settled(evidence with { PatchCompile = compile }) is { } afterCompile)
             {
-                return Failed(change, steps, compile.Failure, "补丁编译失败");
+                return afterCompile;
             }
 
             RunResult patchRun = _unity.RunScenario(
                 baselineDir, Path.Combine(_paths.ArtifactRoot, "run-patch"), change.Scenario, RunTimeout, "patch-run", patchDlls);
             steps.Add(patchRun);
-            if (!patchRun.Succeeded)
+            if (Settled(evidence with { PatchRun = patchRun }) is { } afterRun)
             {
-                return Failed(change, steps, patchRun.Failure, "补丁装上母包后未能跑完场景");
+                return afterRun;
             }
 
-            // 三、确定性自检：同一包同一场景再跑一次，必须逐帧一致
+            // 三、确定性自检与四、覆盖自检：同一包同一场景再跑一次，判定规则随即检查两项
             RunResult patchRunAgain = _unity.RunScenario(
                 baselineDir, Path.Combine(_paths.ArtifactRoot, "run-patch-2"), change.Scenario, RunTimeout, "patch-run-repeat", patchDlls);
             steps.Add(patchRunAgain);
-            if (!patchRunAgain.Succeeded)
+            if (Settled(evidence with { PatchRunAgain = patchRunAgain }) is { } afterRepeat)
             {
-                return Failed(change, steps, patchRunAgain.Failure, "确定性自检的第二次运行失败");
-            }
-
-            HashSeries patchSeries = HashSeries.Load(patchRun.CsvPath!);
-            DeterminismCheck determinism = Preconditions.CheckDeterminism(
-                patchSeries, HashSeries.Load(patchRunAgain.CsvPath!));
-            if (!determinism.Passed)
-            {
-                return new VerificationReport
-                {
-                    Verdict = Verdict.Void,
-                    CaseName = change.Name,
-                    Scenario = change.Scenario,
-                    Steps = steps,
-                    Baseline = baselineLookup,
-                    Determinism = determinism,
-                    Reason = $"确定性自检不通过：同一场景两次运行在 tick {determinism.FirstDivergentTick} 起不同，比对结果作废",
-                };
-            }
-
-            // 四、覆盖自检：改动点是否真被执行到
-            CoverageCheck coverage = Preconditions.CheckCoverage(patchSeries, change.TouchedComponents);
-            if (!coverage.Passed)
-            {
-                return new VerificationReport
-                {
-                    Verdict = Verdict.Void,
-                    CaseName = change.Name,
-                    Scenario = change.Scenario,
-                    Steps = steps,
-                    Baseline = baselineLookup,
-                    Determinism = determinism,
-                    Coverage = coverage,
-                    Reason = "覆盖自检不通过：" + coverage.Reason,
-                };
+                return afterRepeat;
             }
 
             // 五、整包重编：改动已施加，全量构建后跑同一场景
             StepResult rebuild = _unity.BuildPlayer(rebuildDir, BuildTimeout, "rebuild");
             steps.Add(rebuild);
-            if (!rebuild.Succeeded)
+            if (Settled(evidence with { Rebuild = rebuild }) is { } afterRebuild)
             {
-                return Failed(change, steps, rebuild.Failure, "整包重编失败，无法取得比对基准");
+                return afterRebuild;
             }
 
             RunResult rebuildRun = _unity.RunScenario(
                 rebuildDir, Path.Combine(_paths.ArtifactRoot, "run-rebuild"), change.Scenario, RunTimeout, "rebuild-run");
             steps.Add(rebuildRun);
-            if (!rebuildRun.Succeeded)
-            {
-                return Failed(change, steps, rebuildRun.Failure, "整包重编的产物未能跑完场景");
-            }
-
-            ComparisonResult comparison = SeriesComparer.Compare(
-                HashSeries.Load(rebuildRun.CsvPath!), patchSeries);
-
-            return new VerificationReport
-            {
-                Verdict = comparison.Identical ? Verdict.Equivalent : Verdict.Divergent,
-                CaseName = change.Name,
-                Scenario = change.Scenario,
-                Steps = steps,
-                Baseline = baselineLookup,
-                Comparison = comparison,
-                Determinism = determinism,
-                Coverage = coverage,
-            };
+            return Settled(evidence with { RebuildRun = rebuildRun })
+                   ?? throw new InvalidOperationException("证据已全部到齐却没有定论，判定规则有误");
         }
         finally
         {
@@ -211,15 +176,19 @@ public sealed class VerificationPlan
         }
     }
 
-    private static VerificationReport Failed(
-        ChangeCase change, IReadOnlyList<StepResult> steps, FailureReport failure, string reason) =>
+    private static VerificationReport Report(
+        ChangeCase change, IReadOnlyList<StepResult> steps, CacheLookup? baseline, CaseDecision decision) =>
         new()
         {
-            Verdict = Verdict.PatchFailed,
+            Verdict = decision.Verdict,
             CaseName = change.Name,
             Scenario = change.Scenario,
-            Steps = steps,
-            Failure = failure,
-            Reason = reason,
+            Steps = steps.ToArray(),
+            Baseline = baseline,
+            Comparison = decision.Comparison,
+            Determinism = decision.Determinism,
+            Coverage = decision.Coverage,
+            Failure = decision.Failure,
+            Reason = decision.Reason,
         };
 }

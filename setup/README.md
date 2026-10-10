@@ -107,13 +107,31 @@ D:\pp\bin\cli\patchparity.exe verify `
 powershell -ExecutionPolicy Bypass -File D:\pp\patchparity\setup\new-eval-run.ps1 -Name smoke
 ```
 
-它在 `D:\pp\e\smoke` 下写入两份 MCP 配置，并打印跑批命令。风险档取 A：`list_scenarios` 为 read，其余 6 个为 write，
-跑批要加 `--yolo`（裁决 015）。DeepSeek 的 key 只设在当前进程的环境变量里，不写进任何文件。
+它做三件事：
+
+1. 在 `D:\pp\e\smoke` 下写两份 MCP 配置。风险档取 A：`list_scenarios` 为 read，其余 6 个为 write，跑批要加 `--yolo`（裁决 015）。
+2. 按 `cases/cases.json` 在 `D:\pp\patchparity\eval\tasks` 下生成题目目录，一道题一个子目录。题目目录含本机绝对路径，
+   不入库，每次重新生成。
+3. 打印 `pigeon eval` 的完整命令。
+
+先只跑一道题，把命令里的题目目录换成某一道题的子目录即可：
+
+```powershell
+$env:DEEPSEEK_API_KEY = '<你的 key>'   # 只设在当前进程，不写进任何文件
+node D:\pp\pigeon\src\cli\index.ts eval D:\pp\patchparity\eval\tasks\safe-item-lifetime --out D:\pp\e\smoke `
+  --runs 1 --conditions none --skill D:\pp\e\smoke\unused-skills `
+  --stream-fn D:\pp\pigeon\local\deepseek-stream-fn.mjs --provider deepseek --model deepseek-v4-flash --yolo
+```
 
 `pigeon eval` 不接受 `--concurrency`，传了会报未知参数退出；它本身逐题串行。`--runs 1 --conditions none --skill <任意路径>`
 都必须显式给。
 
-> 题目目录（`eval/tasks/`）与判定落盘尚在制作中（路线图 S4），完成后在此补上跑一道题的完整步骤。
+一道题的过程：Agent 照题面依次调用 patchparity 的工具，服务端每完成一步就把结果记进该题工作树里的
+`patchparity-ledger.json`；Agent 收工后，Pigeon 运行题目目录里的 `verify.mjs`，它调用 `patchparity judge`，用与命令行验证
+同一套规则从台账判定，并与预期比对。判定不采信 Agent 的说法（裁决 009），预期也不写在题面里。
+
+结果看 `D:\pp\e\smoke\results.jsonl`：每题一行，其中收着 judge 输出的 JSON 摘要（判定、首个分歧 tick 与分歧层、各步耗时、
+母包基线是否命中缓存）。服务端那份台账另存在 `D:\pp\artifacts\sessions\<会话号>\` 下，工作树判完分就会被删。
 
 ## 常见问题
 
