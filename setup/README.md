@@ -130,6 +130,10 @@ node D:\pp\pigeon\src\cli\index.ts eval D:\pp\patchparity\eval\tasks\safe-item-l
 `patchparity-ledger.json`；Agent 收工后，Pigeon 运行题目目录里的 `verify.mjs`，它调用 `patchparity judge`，用与命令行验证
 同一套规则从台账判定，并与预期比对。判定不采信 Agent 的说法（裁决 009），预期也不写在题面里。
 
+长时间跑批时，离开前**断开**远程桌面（直接关掉窗口），不要**注销**：断开后会话里的进程继续运行，注销会结束它们。
+云主机专门给 patchparity 用，`--yolo` 放行的是这台机器上的全部权限，不要在上面放别的重要东西。
+Pigeon 的 `--sandbox` 用不上：它把工作区放进 Linux 容器，而 Unity 与 MCP 服务端必须在这台 Windows 主机上。
+
 结果看 `D:\pp\e\smoke\results.jsonl`：每题一行，其中收着 judge 输出的 JSON 摘要（判定、首个分歧 tick 与分歧层、各步耗时、
 母包基线是否命中缓存）。服务端那份台账另存在 `D:\pp\artifacts\sessions\<会话号>\` 下，工作树判完分就会被删。
 
