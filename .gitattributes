@@ -1,0 +1,2 @@
+# 补丁统一用 LF：在新机器上克隆后与被测样例的工作区换行一致，git apply 才能成立
+*.patch text eol=lf
