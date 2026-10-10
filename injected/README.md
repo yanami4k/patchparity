@@ -4,25 +4,29 @@
 
 ## 还原步骤
 
-1. 克隆样例并锁定 commit：
+整套还原已由 `setup/prepare-workspace.ps1` 自动完成，步骤与说明见 `setup/README.md`。手工还原时按下面的顺序：
+
+1. 只取锁定的那一个提交，并把 `core.autocrlf` 设为 `true`（环境补丁与改动用例都按这样的工作区制作）：
 
    ```
-   git clone --depth 1 https://github.com/xpTURN/Klotho.git vendor/Klotho
-   cd vendor/Klotho && git checkout e29c4892c88db097f3ac0d135874c82e9b6726d6
+   git init vendor/Klotho && cd vendor/Klotho
+   git config core.autocrlf true
+   git remote add origin https://github.com/xpTURN/Klotho.git
+   git fetch --depth 1 origin e29c4892c88db097f3ac0d135874c82e9b6726d6
+   git checkout FETCH_HEAD
    ```
 
-2. 在样例工程的包清单 `Samples/Brawler/Packages/manifest.json` 的 dependencies 中加入：
+2. 施加环境补丁：`git apply <patchparity>/injected/environment/environment.patch`。
+   它包含 HybridCLR v8.14.1（`packages-lock.json` 锁到具体提交）、IL2CPP 脚本后端、编辑器版本号，
+   以及 Unity 6000.3.18f1 首次打开工程时自动做的包升级。
 
-   ```
-   "com.code-philosophy.hybridclr": "https://github.com/focus-creative-games/hybridclr_unity.git#v8.14.1"
-   ```
-
-3. 把本目录下的 `PatchParity/` 整体复制到 `Samples/Brawler/Assets/PatchParity/`。
+3. 把本目录下的 `PatchParity/` 复制到 `Samples/Brawler/Assets/PatchParity/`，
+   把 `environment/ProjectSettings/HybridCLRSettings.asset` 复制到 `Samples/Brawler/ProjectSettings/`。
 
 4. 运行 HybridCLR 安装器（把改造版 il2cpp 复制进工程内的 HybridCLRData，不改动编辑器安装目录）：
 
    ```
-   Unity.exe -batchmode -nographics -projectPath <Brawler> -executeMethod PatchParity.EditorTools.PatchParityHybridClr.Install
+   Unity.exe -batchmode -nographics -projectPath <Brawler> -executeMethod PatchParity.EditorTools.PatchParityHybridClr.Install -patchparityOutput <输出目录>
    ```
 
 5. 生成并构建无头验证包（内部会先跑 HybridCLR 的完整生成流程）：
@@ -44,6 +48,8 @@
 | `Editor/PatchParityHybridClr.cs` | 编辑器 | HybridCLR 状态查询与安装入口 |
 | `Editor/PatchParityBuild.cs` | 编辑器 | 完整游戏的整包构建入口，用于测量基线耗时 |
 | `Scenes/Verify.unity` | 验证场景 | 由构建脚本生成，仅含一个挂载 VerifyBootstrap 的对象 |
+| `environment/environment.patch` | 被测样例 | 施加在锁定提交上的环境改动，见还原步骤第 2 步 |
+| `environment/ProjectSettings/HybridCLRSettings.asset` | 被测样例 | HybridCLR 设置，含热更程序集清单 |
 
 ## 注意
 

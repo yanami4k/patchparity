@@ -1,2 +1,4 @@
 # 补丁统一用 LF：在新机器上克隆后与被测样例的工作区换行一致，git apply 才能成立
 *.patch text eol=lf
+# PowerShell 5.1 按 BOM 认 UTF-8，脚本里有中文；换行保持 CRLF，避免在 Windows 上被改动
+*.ps1 text eol=crlf
