@@ -14,6 +14,14 @@ public static class VerifyCommand
             return 2;
         }
 
+        // 与 MCP 会话共用同一把工作区租约：命令行验证同样施加改动、启动 Unity
+        using WorkspaceLease lease = WorkspaceLease.ForProject(options.Project);
+        if (!lease.TryAcquire(out string? holder))
+        {
+            Console.Error.WriteLine($"工作区被另一个会话占用（{holder}），同一个 Unity 工程同一时刻只允许一个会话施加改动或构建。");
+            return 6;
+        }
+
         var paths = new ToolPaths
         {
             UnityExecutable = options.Unity,
@@ -27,7 +35,9 @@ public static class VerifyCommand
             new UnityInvoker(paths, new ProcessLauncher()),
             new GitPatchSource(options.Repository))
         {
-            ReuseBaselinePackage = options.ReuseBaseline,
+            // 与 MCP 共用同一套缓存键：用 --cache 指向同一目录时，两边可互相复用母包基线
+            Cache = options.NoCache ? null : new BaselineCache(options.Cache),
+            BaselineKey = options.NoCache ? null : () => CacheKeyBuilder.ForProject(options.Unity, options.Project),
         };
 
         var change = new ChangeCase
@@ -40,7 +50,7 @@ public static class VerifyCommand
         };
 
         Console.WriteLine($"用例 {change.Name}｜场景 {change.Scenario.Name}｜预期 {Describe(change.Expected)}");
-        Console.WriteLine(options.ReuseBaseline ? "复用已有母包基线" : "从改动前的源码构建母包基线");
+        Console.WriteLine(options.NoCache ? "不用缓存，从改动前的源码构建母包基线" : "母包基线按内容哈希缓存：" + options.Cache);
         Console.WriteLine();
 
         VerificationReport report = plan.Verify(change);
@@ -60,6 +70,13 @@ public static class VerifyCommand
 
     private static void Print(VerificationReport report)
     {
+        if (report.Baseline is { } baseline)
+        {
+            // 裁决 005：缓存键的组成随报告打印，漏项导致的错误复用才查得出来
+            Console.WriteLine(baseline.Hit ? "母包基线: 命中缓存，跳过构建" : "母包基线: 未命中，已构建并写入缓存");
+            Console.WriteLine(baseline.Key.Describe());
+        }
+
         foreach (StepResult step in report.Steps)
         {
             string state = step.Succeeded ? "成功" : "失败";
@@ -138,7 +155,9 @@ public static class VerifyCommand
                              --case <patch 路径> --name <用例名>
                              [--touched 组件A,组件B] [--expect safe|dangerous|boundary]
                              [--seed 42] [--ticks 600] [--players 2] [--bots 0]
-                             [--reuse-baseline]
+                             [--cache <缓存目录，缺省为产物目录下的 baseline-cache>] [--no-cache]
+
+        退出码: 0 一致 / 3 不一致 / 4 作废 / 5 补丁失败 / 6 工作区被占用 / 2 用法错误
         """);
 
     private sealed class Options
@@ -155,7 +174,8 @@ public static class VerifyCommand
         public int Ticks = 600;
         public int Players = 2;
         public int Bots;
-        public bool ReuseBaseline;
+        public string Cache = "";
+        public bool NoCache;
 
         public static Options? Parse(IReadOnlyList<string> args)
         {
@@ -163,9 +183,9 @@ public static class VerifyCommand
             for (int i = 1; i < args.Count; i++)
             {
                 string flag = args[i];
-                if (flag == "--reuse-baseline")
+                if (flag == "--no-cache")
                 {
-                    o.ReuseBaseline = true;
+                    o.NoCache = true;
                     continue;
                 }
                 if (i + 1 >= args.Count)
@@ -179,6 +199,7 @@ public static class VerifyCommand
                     case "--project": o.Project = value; break;
                     case "--artifacts": o.Artifacts = value; break;
                     case "--repo": o.Repository = value; break;
+                    case "--cache": o.Cache = value; break;
                     case "--case": o.CasePath = value; break;
                     case "--name": o.Name = value; break;
                     case "--touched": o.Touched = value.Split(',', StringSplitOptions.RemoveEmptyEntries); break;
@@ -196,6 +217,11 @@ public static class VerifyCommand
                     case "--bots": o.Bots = int.Parse(value); break;
                     default: return null;
                 }
+            }
+
+            if (o.Cache.Length == 0 && o.Artifacts.Length > 0)
+            {
+                o.Cache = Path.Combine(o.Artifacts, "baseline-cache");
             }
 
             bool complete = o.Unity.Length > 0 && o.Project.Length > 0 && o.Artifacts.Length > 0

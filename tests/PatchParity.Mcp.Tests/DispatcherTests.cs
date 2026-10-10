@@ -13,6 +13,7 @@ public class DispatcherTests : IDisposable
     private readonly FakeUnity _unity;
     private readonly Tools _tools;
     private readonly McpDispatcher _dispatcher;
+    private readonly WorkspaceLease _lease;
 
     private const string Header = "tick,total,c:Item:count,c:Item:hash";
     private const string BaselineCsv = Header + "\n0,1,1,10\n1,2,1,20\n";
@@ -25,6 +26,7 @@ public class DispatcherTests : IDisposable
         var paths = new ToolPaths { UnityExecutable = "unity", ProjectPath = _root, ArtifactRoot = _root };
         var cache = new BaselineCache(Path.Combine(_root, "cache"));
         _unity.Cache = cache;
+        _lease = WorkspaceLease.ForProject(_root);
 
         // 包的键随源码状态变化：施加改动前后各算一次，得到两个不同的键
         _tools = new Tools(
@@ -36,7 +38,8 @@ public class DispatcherTests : IDisposable
             {
                 Value = _patch.Applied ? "patched0000" : "baseline000",
                 Composition = new[] { new CacheKeyInput("源码", _patch.Applied ? "p" : "b") },
-            });
+            },
+            _lease);
         _unity.PatchedKey = "patched0000";
         _dispatcher = new McpDispatcher(_tools);
     }
@@ -46,6 +49,7 @@ public class DispatcherTests : IDisposable
         // 与会话结束走同一条路径：放开被卡住的任务，等后台任务全部结束并撤销改动，再清理目录
         _unity.Hold?.Set();
         _tools.RevertAll();
+        _lease.Dispose();
 
         if (Directory.Exists(_root))
         {
@@ -339,6 +343,49 @@ public class DispatcherTests : IDisposable
 
         Assert.Equal("failed", Structured(done, "status"));
         Assert.True(IsError(done));
+    }
+
+    // ── 会话之间的隔离 ─────────────────────────────────────
+    // 源码状态跨多次调用保持，另一个会话插进来会把别人的改动当成基线或把两份改动叠在一起，且不报错
+
+    [Theory]
+    [InlineData("build_package")]
+    [InlineData("build_patch")]
+    [InlineData("revert_patch")]
+    public void 另一个会话持有工作区时改动工程的工具被拒绝(string tool)
+    {
+        using WorkspaceLease other = WorkspaceLease.ForProject(_root);
+        Assert.True(other.TryAcquire(out _));
+
+        JsonNode result = Call(tool, new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+
+        Assert.True(IsError(result));
+        Assert.Contains("另一个会话占用", result["content"]![0]!["text"]!.GetValue<string>());
+        Assert.False(_patch.Applied);
+        Assert.Empty(_unity.CompileTargets);
+    }
+
+    [Fact]
+    public void 另一个会话持有工作区时只读工具照常可用()
+    {
+        using WorkspaceLease other = WorkspaceLease.ForProject(_root);
+        Assert.True(other.TryAcquire(out _));
+        WriteRun("a", BaselineCsv);
+        WriteRun("b", BaselineCsv);
+
+        Assert.False(IsError(Call("list_scenarios", new JsonObject())));
+        Assert.False(IsError(Call("compare_runs", new JsonObject { ["left"] = "a", ["right"] = "b" })));
+    }
+
+    [Fact]
+    public void 本会话取得工作区后另一个会话拿不到()
+    {
+        RunJob("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+        Call("revert_patch", new JsonObject { ["patch_path"] = "cases/x.patch" });
+
+        // 撤销之后仍持有：租约以会话为单位，持有到会话结束
+        using WorkspaceLease other = WorkspaceLease.ForProject(_root);
+        Assert.False(other.TryAcquire(out _));
     }
 
     // ── 入参校验 ───────────────────────────────────────────

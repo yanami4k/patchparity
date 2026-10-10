@@ -29,6 +29,10 @@ public sealed record ToolSpec
 ///
 /// 启动 Unity 的工具（build_package、build_patch、run_scenario）先同步校验入参，通过后在后台运行并立即返回任务号，
 /// 由 wait_job 分次等待。MCP 客户端普遍对单次请求设 60 秒上限，而整包构建要十余分钟。
+///
+/// 会话之间的隔离：每个会话（每个服务端进程）有自己的产物目录，运行与补丁按名字只在本会话内可见；
+/// 母包基线缓存跨会话共享。改动源码或 Unity 工程的工具（build_package、build_patch、revert_patch）
+/// 须先取得工作区租约，被其他会话持有时明确拒绝、不排队。
 /// </summary>
 public sealed class Tools
 {
@@ -37,6 +41,7 @@ public sealed class Tools
     private readonly IPatchSource _patch;
     private readonly BaselineCache _cache;
     private readonly Func<CacheKey> _packageKey;
+    private readonly WorkspaceLease _lease;
 
     // 本会话施加过、尚未撤销的改动。会话结束时兜底撤销，避免把被测样例的源码留在改过的状态
     private readonly Dictionary<string, ChangeCase> _applied = new(StringComparer.Ordinal);
@@ -46,13 +51,16 @@ public sealed class Tools
     /// <summary>wait_job 单次等待的上限，须低于客户端的请求超时。</summary>
     public const int MaxWaitSeconds = 50;
 
-    public Tools(ToolPaths paths, UnityInvoker unity, IPatchSource patch, BaselineCache cache, Func<CacheKey> packageKey)
+    public Tools(
+        ToolPaths paths, UnityInvoker unity, IPatchSource patch, BaselineCache cache, Func<CacheKey> packageKey,
+        WorkspaceLease lease)
     {
         _paths = paths;
         _unity = unity;
         _patch = patch;
         _cache = cache;
         _packageKey = packageKey;
+        _lease = lease;
     }
 
     public TimeSpan BuildTimeout { get; init; } = TimeSpan.FromMinutes(30);
@@ -171,7 +179,7 @@ public sealed class Tools
     public ToolResult Invoke(string name, JsonElement arguments) => name switch
     {
         "list_scenarios" => ListScenarios(),
-        "build_package" => StartJob("build_package", BuildPackage),
+        "build_package" => WithLease(() => StartJob("build_package", BuildPackage)),
         "build_patch" => BuildPatch(arguments),
         "revert_patch" => RevertPatch(arguments),
         "run_scenario" => RunScenario(arguments),
@@ -303,7 +311,7 @@ public sealed class Tools
             Expected = ExpectedVerdict.Boundary,
         };
 
-        return StartJob("build_patch", () => CompilePatch(change, patchName));
+        return WithLease(() => StartJob("build_patch", () => CompilePatch(change, patchName)));
     }
 
     private ToolResult CompilePatch(ChangeCase change, string patchName)
@@ -348,6 +356,12 @@ public sealed class Tools
             return ToolResult.Failure("缺少 patch_path");
         }
 
+        // 撤销也要租约：否则本会话可能把另一个会话施加的同一份改动撤掉
+        return WithLease(() => Revert(patchPath));
+    }
+
+    private ToolResult Revert(string patchPath)
+    {
         if (_jobs.RunningExclusive is { } running)
         {
             return ToolResult.Failure($"任务 {running} 仍在运行，此时撤销改动会得到半截状态。请先用 wait_job 等它结束。");
@@ -468,6 +482,17 @@ public sealed class Tools
             },
             Evidence = run.Report,
         };
+    }
+
+    private ToolResult WithLease(Func<ToolResult> action)
+    {
+        if (!_lease.TryAcquire(out string? holder))
+        {
+            return ToolResult.Failure(
+                $"工作区被另一个会话占用（{holder}）。同一个 Unity 工程同一时刻只允许一个会话施加改动或构建，" +
+                "本次调用被拒绝，不排队。");
+        }
+        return action();
     }
 
     private ToolResult StartJob(string tool, Func<ToolResult> work)

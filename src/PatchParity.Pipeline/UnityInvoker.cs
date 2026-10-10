@@ -39,6 +39,12 @@ public sealed class UnityInvoker
         _launcher = launcher;
     }
 
+    /// <summary>
+    /// 启动编辑器前，等工程上的另一个 Unity 退出的最长时间。上一步的编辑器写出产物后还要几秒才退出，
+    /// 紧接着的下一步须稍等；超过此时长仍被占用，即是残留的编辑器，立即判失败而不是等到构建超时。
+    /// </summary>
+    public TimeSpan EditorLockGrace { get; init; } = TimeSpan.FromMinutes(2);
+
     /// <summary>整包构建无头验证包。内部会先跑 HybridCLR 的生成流程，耗时以分钟计。</summary>
     public StepResult BuildPlayer(string outputDir, TimeSpan timeout, string stepName = "build")
     {
@@ -47,6 +53,11 @@ public sealed class UnityInvoker
 
         // 旧产物不清会让等待立即返回，把上一轮的结果当成这一轮的
         DeleteIfExists(artifact);
+
+        if (WaitForEditorLock(stepName) is { } blocked)
+        {
+            return blocked;
+        }
 
         var started = DateTime.UtcNow;
         _launcher.LaunchDetached(_paths.UnityExecutable, new[]
@@ -95,6 +106,11 @@ public sealed class UnityInvoker
         string log = Path.Combine(_paths.ArtifactRoot, stepName + ".log");
 
         DeleteIfExists(artifact);
+
+        if (WaitForEditorLock(stepName) is { } blocked)
+        {
+            return blocked;
+        }
 
         var started = DateTime.UtcNow;
         _launcher.LaunchDetached(_paths.UnityExecutable, new[]
@@ -187,6 +203,34 @@ public sealed class UnityInvoker
             Failure = failure,
             CsvPath = ok ? csvPath : null,
         };
+    }
+
+    /// <summary>
+    /// 工程被另一个 Unity 占用时，新启动的编辑器会立即退出、不产出任何产物，
+    /// 而等待方以产物为完成信号，只能干等到超时（整包构建为半小时）。故启动前先查，宽限期过后仍被占用即失败。
+    /// </summary>
+    private StepResult? WaitForEditorLock(string stepName)
+    {
+        DateTime deadline = DateTime.UtcNow + EditorLockGrace;
+        while (UnityProjectLock.IsHeld(_paths.ProjectPath))
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                return new StepResult
+                {
+                    Step = stepName,
+                    Succeeded = false,
+                    Failure = new FailureReport
+                    {
+                        Stage = FailureStage.Build,
+                        Message = $"工程被另一个 Unity 进程占用（{UnityProjectLock.LockfilePath(_paths.ProjectPath)}），" +
+                                  $"等待 {EditorLockGrace.TotalSeconds:F0} 秒仍未释放。可能是之前的会话中途退出后残留的编辑器，需先结束它",
+                    },
+                };
+            }
+            Thread.Sleep(TimeSpan.FromSeconds(1));
+        }
+        return null;
     }
 
     private static FailureReport ClassifyBuildLog(string logPath)

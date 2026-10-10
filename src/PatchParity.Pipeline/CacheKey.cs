@@ -65,6 +65,23 @@ public static class CacheKeyBuilder
     }
 
     /// <summary>
+    /// 按 Unity 工程的当前状态计算包的缓存键。MCP 与命令行共用这一处，两边的键必须一致才能共享同一份缓存。
+    /// 源码取工程的 Assets，另加影响构建结果的外部输入。施加改动前后各算一次即得母包基线与整包重编两个不同的键。
+    /// </summary>
+    public static CacheKey ForProject(string unityExecutable, string projectPath)
+    {
+        string manifest = Path.Combine(projectPath, "Packages", "manifest.json");
+        return ForBaseline(
+            new[] { Path.Combine(projectPath, "Assets") },
+            new Dictionary<string, string>
+            {
+                ["编辑器可执行文件"] = unityExecutable,
+                ["工程设置"] = HashDirectory(Path.Combine(projectPath, "ProjectSettings")),
+                ["包清单"] = File.Exists(manifest) ? File.ReadAllText(manifest) : "缺失",
+            });
+    }
+
+    /// <summary>
     /// 目录内容的摘要：按相对路径排序后，逐个纳入路径与文件内容。
     /// 纳入路径是必要的——仅哈希内容时，改名或移动文件不会改变键。
     /// </summary>
