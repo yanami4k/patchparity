@@ -19,23 +19,50 @@ public class SessionIsolationTests : IDisposable
 
     public SessionIsolationTests()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "project"));
-        Directory.CreateDirectory(Path.Combine(_root, "repo"));
+        // 被测样例仓库须是真的 git 仓库：开工前要核对玩法源码与锁定提交是否一致
+        Directory.CreateDirectory(Path.Combine(Project, "Assets", "Brawler"));
+        File.WriteAllText(Path.Combine(Project, "Assets", "Brawler", "Item.cs"), "class Item {}\n");
+        Git("init", "-q");
+        Git("config", "core.autocrlf", "false");
+        Git("add", "-A");
+        Git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base");
+
+        // 一份改动用例：放在仓库外，相当于题目工作树里的补丁
+        Directory.CreateDirectory(Path.Combine(_root, "cases"));
+        File.WriteAllText(PatchFile,
+            "diff --git a/project/Assets/Brawler/Item.cs b/project/Assets/Brawler/Item.cs\n" +
+            "--- a/project/Assets/Brawler/Item.cs\n" +
+            "+++ b/project/Assets/Brawler/Item.cs\n" +
+            "@@ -1 +1 @@\n" +
+            "-class Item {}\n" +
+            "+class Item { int life = 2; }\n");
     }
+
+    private string PatchFile => Path.Combine(_root, "cases", "x.patch");
+    private string ItemSource => File.ReadAllText(Path.Combine(Project, "Assets", "Brawler", "Item.cs"));
 
     public void Dispose()
     {
+        foreach (string file in Directory.GetFiles(_root, "*", SearchOption.AllDirectories))
+        {
+            File.SetAttributes(file, FileAttributes.Normal);
+        }
         Directory.Delete(_root, recursive: true);
         GC.SuppressFinalize(this);
     }
 
-    private string[] Args => new[]
+    private string Repo => Path.Combine(_root, "repo");
+    private string Project => Path.Combine(Repo, "project");
+
+    private string[] ArgsWithUnity(string unity) => new[]
     {
-        "--unity", Path.Combine(_root, "no-unity.exe"),
-        "--project", Path.Combine(_root, "project"),
+        "--unity", unity,
+        "--project", Project,
         "--artifacts", Path.Combine(_root, "artifacts"),
-        "--repo", Path.Combine(_root, "repo"),
+        "--repo", Repo,
     };
+
+    private string[] Args => ArgsWithUnity(Path.Combine(_root, "no-unity.exe"));
 
     // ── 产物目录 ───────────────────────────────────────────
 
@@ -130,6 +157,46 @@ public class SessionIsolationTests : IDisposable
         }
     }
 
+    [Fact]
+    public void 上一个会话没收尾就消失时下一个会话开工前恢复源码()
+    {
+        // 施加改动后会话被强杀：不撤销、不收尾，租约由系统释放
+        using (ServerSession killed = ServerSession.Create(Args, "s1")!)
+        {
+            Invoke(killed, "build_patch", new { patch_path = PatchFile, patch_name = "x" });
+            killed.Tools.Invoke("wait_job", JsonSerializer.SerializeToElement(new { job_id = "job-1-build_patch", max_wait_seconds = 10 }));
+            Assert.Contains("life = 2", ItemSource);
+        }
+
+        using ServerSession next = ServerSession.Create(Args, "s2")!;
+        ToolResult started = Invoke(next, "build_package", new { });
+
+        Assert.True(started.Ok, started.Text);
+        Assert.Equal("class Item {}\n", ItemSource);
+    }
+
+    [Fact]
+    public void 服务端拉起的子进程不握着客户端的管道()
+    {
+        // 客户端（Pigeon）关闭服务端后要等管道全部关闭才算结束，而且没有第二道超时。
+        // 子进程若继承了服务端的标准输出，只要它还活着，客户端就一直等。这里用一个会存活十几秒的假 Unity 检验
+        string fakeUnity = Path.Combine(_root, "fake-unity.cmd");
+        File.WriteAllText(fakeUnity, "@ping -n 15 127.0.0.1 >nul\r\n");
+
+        using Process server = StartServer(ArgsWithUnity(fakeUnity));
+        JsonNode started = CallOverStdio(server, "build_package", new JsonObject());
+        Assert.False(started["result"]!["isError"]!.GetValue<bool>(), started.ToJsonString());
+        // 等假 Unity 真正起来，再只杀服务端本身、不杀子进程树
+        Thread.Sleep(TimeSpan.FromSeconds(2));
+        Task<string> rest = server.StandardOutput.ReadToEndAsync();
+
+        var clock = Stopwatch.StartNew();
+        server.Kill(entireProcessTree: false);
+
+        Assert.True(rest.Wait(TimeSpan.FromSeconds(8)),
+            $"服务端已被杀，但它的标准输出 {clock.Elapsed.TotalSeconds:F0} 秒后仍未关闭：子进程握着管道");
+    }
+
     private static ToolResult Invoke(ServerSession session, string tool, object arguments) =>
         session.Tools.Invoke(tool, JsonSerializer.SerializeToElement(arguments));
 
@@ -140,7 +207,9 @@ public class SessionIsolationTests : IDisposable
         File.WriteAllText(Path.Combine(dir, "hashes.csv"), Csv);
     }
 
-    private Process StartServer()
+    private Process StartServer() => StartServer(Args);
+
+    private static Process StartServer(IEnumerable<string> args)
     {
         var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "patchparity-mcp.exe"))
         {
@@ -151,7 +220,7 @@ public class SessionIsolationTests : IDisposable
             StandardInputEncoding = new UTF8Encoding(false),
             StandardOutputEncoding = Encoding.UTF8,
         };
-        foreach (string arg in Args)
+        foreach (string arg in args)
         {
             info.ArgumentList.Add(arg);
         }
@@ -180,5 +249,25 @@ public class SessionIsolationTests : IDisposable
         Task<string?> line = server.StandardOutput.ReadLineAsync();
         Assert.True(line.Wait(TimeSpan.FromSeconds(30)), "服务端未在 30 秒内应答");
         return JsonNode.Parse(line.Result!)!;
+    }
+
+    private void Git(params string[] arguments)
+    {
+        var info = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = Repo,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (string argument in arguments)
+        {
+            info.ArgumentList.Add(argument);
+        }
+        using Process process = Process.Start(info)!;
+        process.StandardOutput.ReadToEnd();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
     }
 }

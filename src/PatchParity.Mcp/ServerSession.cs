@@ -54,7 +54,7 @@ public sealed class ServerSession : IDisposable
         var tools = new Tools(
             paths,
             new UnityInvoker(paths, new ProcessLauncher()),
-            new GitPatchSource(config.Repository),
+            JournaledPatchSource.ForProject(config.Repository, config.Project),
             new BaselineCache(config.Cache),
             () => CacheKeyBuilder.ForProject(config.Unity, config.Project),
             lease);

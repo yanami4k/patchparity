@@ -11,6 +11,9 @@ public static class Program
 {
     public static int Main(string[] args)
     {
+        // 须在启动任何子进程之前：此后由本进程拉起的 Unity 不再握有客户端的管道
+        StdioIsolation.Apply();
+
         using ServerSession? session = ServerSession.Create(args, ServerSession.NewSessionId());
         if (session is null)
         {

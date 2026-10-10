@@ -44,6 +44,12 @@ public interface IPatchSource
 {
     void Apply(ChangeCase change);
     void Revert(ChangeCase change);
+
+    /// <summary>
+    /// 开工前把工作区恢复干净：撤销此前会话残留的改动，并核对受保护的源码。
+    /// 返回 null 表示可以开工，否则为拒绝开工的原因。不记录改动的实现无从恢复，缺省视为干净。
+    /// </summary>
+    string? RestoreWorkspace() => null;
 }
 
 /// <summary>
@@ -77,6 +83,19 @@ public sealed class GitPatchSource : IPatchSource
         }
     }
 
+    /// <summary>
+    /// 某路径下相对当前提交的改动，含未跟踪文件，每项一行 porcelain 格式。干净时为空。
+    /// </summary>
+    public IReadOnlyList<string> ChangesUnder(string path)
+    {
+        (bool ok, string output) = Capture("status", "--porcelain", "--untracked-files=all", "--", path);
+        if (!ok)
+        {
+            throw new InvalidOperationException($"git status 失败（工作目录 {_repositoryPath}）");
+        }
+        return output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
     /// <summary>反向施加能否成功，即为该改动当前是否已施加。</summary>
     private bool IsApplied(ChangeCase change) =>
         TryRun("apply", "-R", "--check", change.PatchPath);
@@ -90,7 +109,9 @@ public sealed class GitPatchSource : IPatchSource
         }
     }
 
-    private bool TryRun(params string[] arguments)
+    private bool TryRun(params string[] arguments) => Capture(arguments).Ok;
+
+    private (bool Ok, string Output) Capture(params string[] arguments)
     {
         var info = new ProcessStartInfo(_gitExecutable)
         {
@@ -107,11 +128,13 @@ public sealed class GitPatchSource : IPatchSource
         using Process? process = Process.Start(info);
         if (process is null)
         {
-            return false;
+            return (false, "");
         }
-        process.StandardOutput.ReadToEnd();
-        process.StandardError.ReadToEnd();
+        // 两路都要读完，否则任一缓冲区写满会卡住子进程
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        string output = process.StandardOutput.ReadToEnd();
+        error.Wait();
         process.WaitForExit();
-        return process.ExitCode == 0;
+        return (process.ExitCode == 0, output);
     }
 }

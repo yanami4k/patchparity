@@ -388,6 +388,61 @@ public class DispatcherTests : IDisposable
         Assert.False(other.TryAcquire(out _));
     }
 
+    // ── 开工前恢复 ─────────────────────────────────────────
+    // 上一个持有者未必走完了收尾：Pigeon 关闭服务端时只等 2 秒就强杀
+
+    [Fact]
+    public void 拿到工作区后先恢复再动手且只恢复一次()
+    {
+        RunJob("build_package", new JsonObject());
+        RunJob("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+
+        Assert.Equal(1, _patch.Restores);
+    }
+
+    [Fact]
+    public void 工作区有无法恢复的残留时拒绝开工且不施加改动()
+    {
+        _patch.RestoreProblem = "玩法源码有来源不明的改动";
+
+        JsonNode result = Call("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+
+        Assert.True(IsError(result));
+        Assert.Contains("来源不明", result["content"]![0]!["text"]!.GetValue<string>());
+        Assert.False(_patch.Applied);
+        Assert.Empty(_unity.CompileTargets);
+    }
+
+    [Fact]
+    public void 恢复失败后下次调用重试()
+    {
+        _patch.RestoreProblem = "残留";
+        Assert.True(IsError(Call("build_package", new JsonObject())));
+
+        _patch.RestoreProblem = null;
+
+        Assert.False(IsError(RunJob("build_package", new JsonObject())));
+        Assert.Equal(2, _patch.Restores);
+    }
+
+    [Fact]
+    public void 只读工具不触发恢复()
+    {
+        Call("list_scenarios", new JsonObject());
+        WriteRun("a", BaselineCsv);
+        WriteRun("b", BaselineCsv);
+        Call("compare_runs", new JsonObject { ["left"] = "a", ["right"] = "b" });
+
+        Assert.Equal(0, _patch.Restores);
+    }
+
+    [Fact]
+    public void 单次等待的上限给客户端的60秒请求超时留足余量()
+    {
+        // Pigeon 调用 MCP 工具落在 SDK 缺省的 60 秒；构建时主机满载，留 15 秒
+        Assert.True(Tools.MaxWaitSeconds <= 45);
+    }
+
     // ── 入参校验 ───────────────────────────────────────────
 
     [Fact]
@@ -510,8 +565,19 @@ public class DispatcherTests : IDisposable
     private sealed class FakePatch : IPatchSource
     {
         public bool Applied { get; private set; }
+        public int Restores { get; private set; }
+
+        /// <summary>设置后，开工前的恢复报告这个问题，即工作区有无法恢复的残留。</summary>
+        public string? RestoreProblem { get; set; }
+
         public void Apply(ChangeCase change) => Applied = true;
         public void Revert(ChangeCase change) => Applied = false;
+
+        public string? RestoreWorkspace()
+        {
+            Restores++;
+            return RestoreProblem;
+        }
     }
 
     /// <summary>

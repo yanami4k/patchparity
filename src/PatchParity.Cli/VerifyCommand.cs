@@ -22,6 +22,14 @@ public static class VerifyCommand
             return 6;
         }
 
+        // 与 MCP 会话共用同一份改动日志：命令行验证被中断留下的改动，下一个会话能恢复，反之亦然
+        IPatchSource patchSource = JournaledPatchSource.ForProject(options.Repository, options.Project);
+        if (patchSource.RestoreWorkspace() is { } problem)
+        {
+            Console.Error.WriteLine(problem);
+            return 7;
+        }
+
         var paths = new ToolPaths
         {
             UnityExecutable = options.Unity,
@@ -33,7 +41,7 @@ public static class VerifyCommand
         var plan = new VerificationPlan(
             paths,
             new UnityInvoker(paths, new ProcessLauncher()),
-            new GitPatchSource(options.Repository))
+            patchSource)
         {
             // 与 MCP 共用同一套缓存键：用 --cache 指向同一目录时，两边可互相复用母包基线
             Cache = options.NoCache ? null : new BaselineCache(options.Cache),
@@ -157,7 +165,7 @@ public static class VerifyCommand
                              [--seed 42] [--ticks 600] [--players 2] [--bots 0]
                              [--cache <缓存目录，缺省为产物目录下的 baseline-cache>] [--no-cache]
 
-        退出码: 0 一致 / 3 不一致 / 4 作废 / 5 补丁失败 / 6 工作区被占用 / 2 用法错误
+        退出码: 0 一致 / 3 不一致 / 4 作废 / 5 补丁失败 / 6 工作区被占用 / 7 工作区有无法恢复的残留 / 2 用法错误
         """);
 
     private sealed class Options

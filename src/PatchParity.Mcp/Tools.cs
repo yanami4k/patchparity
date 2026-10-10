@@ -43,13 +43,19 @@ public sealed class Tools
     private readonly Func<CacheKey> _packageKey;
     private readonly WorkspaceLease _lease;
 
+    // 拿到租约后工作区是否已恢复干净。恢复失败时保持 false，下次调用重试
+    private bool _workspaceReady;
+
     // 本会话施加过、尚未撤销的改动。会话结束时兜底撤销，避免把被测样例的源码留在改过的状态
     private readonly Dictionary<string, ChangeCase> _applied = new(StringComparer.Ordinal);
 
     private readonly Jobs _jobs = new();
 
-    /// <summary>wait_job 单次等待的上限，须低于客户端的请求超时。</summary>
-    public const int MaxWaitSeconds = 50;
+    /// <summary>
+    /// wait_job 单次等待的上限，须低于客户端的请求超时（实测 Pigeon 落在 MCP SDK 缺省的 60 秒）。
+    /// 留 15 秒余量：构建时主机满载，进程调度与管道往返都可能变慢。
+    /// </summary>
+    public const int MaxWaitSeconds = 45;
 
     public Tools(
         ToolPaths paths, UnityInvoker unity, IPatchSource patch, BaselineCache cache, Func<CacheKey> packageKey,
@@ -151,13 +157,13 @@ public sealed class Tools
         {
             Name = "wait_job",
             Description =
-                "等待一个后台任务，至多等待 max_wait_seconds 秒（上限 50）。" +
+                $"等待一个后台任务，至多等待 max_wait_seconds 秒（上限 {MaxWaitSeconds}）。" +
                 "返回 running 时再次调用；返回 succeeded 或 failed 时附带该任务的完整结果与证据。",
             ReadOnly = true,
             InputSchema = Schema(new JsonObject
             {
                 ["job_id"] = Property("string", "任务号，取自启动任务的工具的返回"),
-                ["max_wait_seconds"] = Property("integer", "本次至多等待的秒数，缺省且上限为 50"),
+                ["max_wait_seconds"] = Property("integer", $"本次至多等待的秒数，缺省且上限为 {MaxWaitSeconds}"),
             }, "job_id"),
         },
         new ToolSpec
@@ -491,6 +497,17 @@ public sealed class Tools
             return ToolResult.Failure(
                 $"工作区被另一个会话占用（{holder}）。同一个 Unity 工程同一时刻只允许一个会话施加改动或构建，" +
                 "本次调用被拒绝，不排队。");
+        }
+
+        // 上一个持有者未必走完了收尾：被强杀、崩溃都会留下改动。拿到租约后、动手之前先恢复
+        if (!_workspaceReady)
+        {
+            string? problem = _patch.RestoreWorkspace();
+            if (problem is not null)
+            {
+                return ToolResult.Failure(problem);
+            }
+            _workspaceReady = true;
         }
         return action();
     }
