@@ -83,7 +83,7 @@ public sealed class UnityInvoker
             };
         }
 
-        string report = File.ReadAllText(artifact);
+        string report = ReadShared(artifact);
         // 构建报告返回 Succeeded 不等于产物可用，故此处只判构建本身，可用性由后续运行确认
         bool ok = report.Contains("result=Succeeded", StringComparison.Ordinal);
         return new StepResult
@@ -137,7 +137,7 @@ public sealed class UnityInvoker
             };
         }
 
-        string report = File.ReadAllText(artifact);
+        string report = ReadShared(artifact);
         bool ok = !report.Contains("ERROR", StringComparison.Ordinal);
         return new StepResult
         {
@@ -190,7 +190,7 @@ public sealed class UnityInvoker
             };
         }
 
-        string resultLine = File.ReadLines(resultPath).FirstOrDefault() ?? "";
+        string resultLine = ReadShared(resultPath).Split('\n')[0].TrimEnd('\r');
         FailureReport failure = FailureClassifier.ClassifyRun(resultLine);
         bool ok = failure.Stage == FailureStage.None && File.Exists(csvPath);
 
@@ -239,10 +239,21 @@ public sealed class UnityInvoker
         {
             return new FailureReport { Stage = FailureStage.Build, Message = "没有产出日志" };
         }
-        FailureReport report = FailureClassifier.ClassifyBuild(File.ReadAllText(logPath));
+        FailureReport report = FailureClassifier.ClassifyBuild(ReadShared(logPath));
         return report.Stage == FailureStage.None
             ? new FailureReport { Stage = FailureStage.Build, Message = "构建未产出报告文件" }
             : report;
+    }
+
+    /// <summary>
+    /// 读 Unity 写的文件时与它共享句柄。编辑器写出构建报告后还要一阵才退出，期间日志仍开着；
+    /// 按缺省方式打开会因"被另一进程使用"而失败（云主机实测：构建失败后归类日志时抛出，任务以异常收场，失败原因丢失）。
+    /// </summary>
+    internal static string ReadShared(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     private static void DeleteIfExists(string path)

@@ -46,12 +46,28 @@ public static class CacheKeyBuilder
     public static CacheKey ForBaseline(
         IReadOnlyList<string> sourceRoots,
         IReadOnlyDictionary<string, string> extras)
+        => ForBaseline(sourceRoots, Array.Empty<string>(), extras);
+
+    /// <summary>
+    /// 构建自己生成、不影响构建结果的目录，相对源码目录。
+    /// HybridCLR 每次构建前都重新生成 HybridCLRGenerate（AOT 泛型引用与 link.xml），内容取决于构建那一刻的源码：
+    /// 整包重编会留下带着改动的版本，计入键就让母包基线在下一次验证时找不到自己（云主机实测）。
+    /// 构建总是先重新生成它，原有内容不影响产物，故不计入。
+    /// </summary>
+    public static readonly string[] ExcludedFromKey = { "HybridCLRGenerate" };
+
+    /// <param name="excludedDirectories">源码目录下不计入的子目录，相对源码目录。</param>
+    public static CacheKey ForBaseline(
+        IReadOnlyList<string> sourceRoots,
+        IReadOnlyList<string> excludedDirectories,
+        IReadOnlyDictionary<string, string> extras)
     {
         var composition = new List<CacheKeyInput>();
 
         foreach (string root in sourceRoots)
         {
-            composition.Add(new CacheKeyInput("源码目录 " + Path.GetFileName(root), HashDirectory(root)));
+            composition.Add(new CacheKeyInput(
+                "源码目录 " + Path.GetFileName(root), HashDirectory(root, excludedDirectories)));
         }
 
         // 排序后纳入，避免字典枚举顺序影响键
@@ -73,6 +89,7 @@ public static class CacheKeyBuilder
         string manifest = Path.Combine(projectPath, "Packages", "manifest.json");
         return ForBaseline(
             new[] { Path.Combine(projectPath, "Assets") },
+            ExcludedFromKey,
             new Dictionary<string, string>
             {
                 ["编辑器可执行文件"] = unityExecutable,
@@ -85,7 +102,10 @@ public static class CacheKeyBuilder
     /// 目录内容的摘要：按相对路径排序后，逐个纳入路径与文件内容。
     /// 纳入路径是必要的——仅哈希内容时，改名或移动文件不会改变键。
     /// </summary>
-    public static string HashDirectory(string root)
+    public static string HashDirectory(string root) => HashDirectory(root, Array.Empty<string>());
+
+    /// <param name="excludedDirectories">不计入的子目录，相对 root。</param>
+    public static string HashDirectory(string root, IReadOnlyList<string> excludedDirectories)
     {
         if (!Directory.Exists(root))
         {
@@ -98,8 +118,10 @@ public static class CacheKeyBuilder
             files.AddRange(Directory.GetFiles(root, pattern, SearchOption.AllDirectories));
         }
 
+        string[] excluded = excludedDirectories.Select(d => d.Replace('\\', '/').TrimEnd('/') + "/").ToArray();
         var entries = files
             .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
+            .Where(p => !excluded.Any(d => p.StartsWith(d, StringComparison.OrdinalIgnoreCase)))
             .OrderBy(p => p, StringComparer.Ordinal)
             .ToList();
 

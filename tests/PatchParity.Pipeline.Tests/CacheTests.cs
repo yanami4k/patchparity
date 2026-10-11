@@ -34,6 +34,53 @@ public class CacheTests : IDisposable
     private CacheKey Key(IReadOnlyDictionary<string, string>? extras = null) =>
         CacheKeyBuilder.ForBaseline(new[] { SourceDir }, extras ?? Extras);
 
+    // ── 按 Unity 工程计算的键 ───────────────────────────────
+
+    private string Project => Path.Combine(_root, "project");
+
+    private CacheKey ProjectKey()
+    {
+        Directory.CreateDirectory(Path.Combine(Project, "Assets", "Game"));
+        if (!File.Exists(Path.Combine(Project, "Assets", "Game", "Item.cs")))
+        {
+            File.WriteAllText(Path.Combine(Project, "Assets", "Game", "Item.cs"), "class Item {}");
+        }
+        return CacheKeyBuilder.ForProject("unity.exe", Project);
+    }
+
+    [Fact]
+    public void 构建生成的HybridCLRGenerate不计入工程的键()
+    {
+        // HybridCLR 每次构建前重新生成它；整包重编会留下带着改动的版本，计入键则母包基线下次找不到自己
+        string before = ProjectKey().Value;
+        string generated = Path.Combine(Project, "Assets", "HybridCLRGenerate");
+        Directory.CreateDirectory(generated);
+        File.WriteAllText(Path.Combine(generated, "AOTGenericReferences.cs"), "// 带着改动生成的版本");
+
+        Assert.Equal(before, ProjectKey().Value);
+    }
+
+    [Fact]
+    public void 工程里其他源码的改动仍改变键()
+    {
+        string before = ProjectKey().Value;
+        File.WriteAllText(Path.Combine(Project, "Assets", "Game", "Item.cs"), "class Item { int life; }");
+
+        Assert.NotEqual(before, ProjectKey().Value);
+    }
+
+    [Fact]
+    public void 名字以排除目录开头的其他目录照样计入()
+    {
+        // 排除按目录匹配，不按前缀字符串：HybridCLRGenerated 不是 HybridCLRGenerate
+        string before = ProjectKey().Value;
+        string similar = Path.Combine(Project, "Assets", "HybridCLRGenerated");
+        Directory.CreateDirectory(similar);
+        File.WriteAllText(Path.Combine(similar, "X.cs"), "class X {}");
+
+        Assert.NotEqual(before, ProjectKey().Value);
+    }
+
     [Fact]
     public void 输入不变则键不变()
     {

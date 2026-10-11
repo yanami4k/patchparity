@@ -35,6 +35,8 @@ public sealed class ProcessLauncher : IProcessLauncher
         {
             info.ArgumentList.Add(argument);
         }
+        // 调用方（如 Pigeon）可能只给了精简过的环境，Unity 缺了标准变量就找不到 MSVC
+        ChildEnvironment.FillMissing(info.Environment);
         Process.Start(info);
     }
 

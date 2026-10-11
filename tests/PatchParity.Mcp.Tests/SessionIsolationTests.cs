@@ -176,6 +176,39 @@ public class SessionIsolationTests : IDisposable
     }
 
     [Fact]
+    public void 客户端只给精简环境时服务端拉起的Unity仍能看到标准环境变量()
+    {
+        // 云主机实测：经 Pigeon 时 Unity 缺 ProgramFiles(x86)，找不到 MSVC，IL2CPP 构建失败；命令行一路同一台机器上成功
+        string seen = Path.Combine(_root, "unity-saw.txt");
+        string fakeUnity = Path.Combine(_root, "fake-unity.cmd");
+        File.WriteAllText(fakeUnity, "@echo %ProgramFiles(x86)%> \"" + seen + "\"\r\n");
+
+        using Process server = StartServer(ArgsWithUnity(fakeUnity), pigeonEnvironment: true);
+        try
+        {
+            JsonNode started = CallOverStdio(server, "build_package", new JsonObject());
+            Assert.False(started["result"]!["isError"]!.GetValue<bool>(), started.ToJsonString());
+
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (!File.Exists(seen) && DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(200);
+            }
+            Thread.Sleep(300);
+
+            // 变量未定义时 cmd 原样输出 %ProgramFiles(x86)%
+            Assert.Equal(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                File.ReadAllText(seen).Trim());
+        }
+        finally
+        {
+            server.Kill(entireProcessTree: true);
+            server.WaitForExit(10_000);
+        }
+    }
+
+    [Fact]
     public void 服务端拉起的子进程不握着客户端的管道()
     {
         // 客户端（Pigeon）关闭服务端后要等管道全部关闭才算结束，而且没有第二道超时。
@@ -209,7 +242,14 @@ public class SessionIsolationTests : IDisposable
 
     private Process StartServer() => StartServer(Args);
 
-    private static Process StartServer(IEnumerable<string> args)
+    // Pigeon 透传给 MCP 服务端的环境变量（src/tools/run-command.ts:30-48），其余一律不给
+    private static readonly string[] PigeonAllowlist =
+    {
+        "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP", "TMPDIR", "HOME",
+        "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
+    };
+
+    private static Process StartServer(IEnumerable<string> args, bool pigeonEnvironment = false)
     {
         var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "patchparity-mcp.exe"))
         {
@@ -223,6 +263,16 @@ public class SessionIsolationTests : IDisposable
         foreach (string arg in args)
         {
             info.ArgumentList.Add(arg);
+        }
+        if (pigeonEnvironment)
+        {
+            foreach (string key in info.Environment.Keys.ToArray())
+            {
+                if (!PigeonAllowlist.Contains(key, StringComparer.OrdinalIgnoreCase))
+                {
+                    info.Environment.Remove(key);
+                }
+            }
         }
 
         Process process = Process.Start(info)!;
