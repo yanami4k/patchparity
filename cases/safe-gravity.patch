@@ -1,0 +1,12 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/TopdownMovementSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/TopdownMovementSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/TopdownMovementSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/TopdownMovementSystem.cs
+@@ -44,7 +44,7 @@ namespace Brawler
+                 if (character.IsJumping || !character.IsGrounded)
+                 {
+                     // Jumping or airborne: apply gravity
+-                    body.velocity.y = body.velocity.y - asset.GravityAccel * dt;
++                    body.velocity.y = body.velocity.y - asset.GravityAccel * dt * FP64.FromInt(2);
+                 }
+                 else if (character.GroundNormal.y < FP64.One)
+                 {

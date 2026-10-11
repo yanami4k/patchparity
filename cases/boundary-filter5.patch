@@ -1,0 +1,12 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+@@ -935,7 +935,7 @@ namespace Brawler
+ 
+         bool TryFindCharacter(ref Frame frame, int playerId, out EntityRef result)
+         {
+-            var filter = frame.Filter<OwnerComponent, CharacterComponent, PhysicsBodyComponent, TransformComponent>();
++            var filter = frame.Filter<OwnerComponent, CharacterComponent, PhysicsBodyComponent, TransformComponent, SkillCooldownComponent>();
+             while (filter.Next(out var entity))
+             {
+                 ref readonly var owner = ref frame.GetReadOnly<OwnerComponent>(entity);

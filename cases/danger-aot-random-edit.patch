@@ -1,0 +1,12 @@
+diff --git a/com.xpturn.klotho/Runtime/Deterministic/Random/DeterministicRandom.cs b/com.xpturn.klotho/Runtime/Deterministic/Random/DeterministicRandom.cs
+--- a/com.xpturn.klotho/Runtime/Deterministic/Random/DeterministicRandom.cs
++++ b/com.xpturn.klotho/Runtime/Deterministic/Random/DeterministicRandom.cs
+@@ -64,7 +64,7 @@ namespace xpTURN.Klotho.Deterministic.Random
+ 
+         private static ulong Mix64(ulong a, ulong b)
+         {
+-            ulong x = a ^ (b + 0x9E3779B97F4A7C15UL);
++            ulong x = a ^ (b + 0x9E3779B97F4A7C17UL);
+             x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9UL;
+             x = (x ^ (x >> 27)) * 0x94D049BB133111EBUL;
+             return x ^ (x >> 31);

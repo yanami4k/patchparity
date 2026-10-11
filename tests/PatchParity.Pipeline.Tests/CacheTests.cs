@@ -69,6 +69,54 @@ public class CacheTests : IDisposable
         Assert.NotEqual(before, ProjectKey().Value);
     }
 
+    /// <summary>工程经包清单以 file: 引用一个在工程之外的本地包，如被测样例的运行时。</summary>
+    private string LocalPackage()
+    {
+        string package = Path.Combine(_root, "runtime-pkg");
+        Directory.CreateDirectory(Path.Combine(package, "Runtime"));
+        File.WriteAllText(Path.Combine(package, "Runtime", "Physics.cs"), "class Physics { int dt = 1000; }");
+        Directory.CreateDirectory(Path.Combine(Project, "Packages"));
+        File.WriteAllText(Path.Combine(Project, "Packages", "manifest.json"),
+            "{ \"dependencies\": { \"com.example.runtime\": \"file:../../runtime-pkg\" } }");
+        return package;
+    }
+
+    [Fact]
+    public void 本地包里的源码改动改变工程的键()
+    {
+        // 改了母包里的框架代码而键不变，整包重编就会直接复用母包基线，比对照常给出"一致"
+        string package = LocalPackage();
+        string before = ProjectKey().Value;
+        File.WriteAllText(Path.Combine(package, "Runtime", "Physics.cs"), "class Physics { int dt = 500; }");
+
+        Assert.NotEqual(before, ProjectKey().Value);
+    }
+
+    [Fact]
+    public void 嵌入在Packages下的包的源码改动改变工程的键()
+    {
+        string embedded = Path.Combine(Project, "Packages", "com.example.embedded");
+        Directory.CreateDirectory(embedded);
+        File.WriteAllText(Path.Combine(embedded, "package.json"), "{}");
+        File.WriteAllText(Path.Combine(embedded, "E.cs"), "class E {}");
+        string before = ProjectKey().Value;
+        File.WriteAllText(Path.Combine(embedded, "E.cs"), "class E { int x; }");
+
+        Assert.NotEqual(before, ProjectKey().Value);
+    }
+
+    [Fact]
+    public void Unity不导入的波浪号目录不计入键()
+    {
+        // 如运行时包里的 Server~：不进构建，改了也不该让母包基线失效
+        string package = LocalPackage();
+        string before = ProjectKey().Value;
+        Directory.CreateDirectory(Path.Combine(package, "Server~"));
+        File.WriteAllText(Path.Combine(package, "Server~", "Mirror.cs"), "class Mirror {}");
+
+        Assert.Equal(before, ProjectKey().Value);
+    }
+
     [Fact]
     public void 名字以排除目录开头的其他目录照样计入()
     {

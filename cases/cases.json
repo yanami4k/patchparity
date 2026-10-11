@@ -5,7 +5,9 @@
       "id": "safe-item-lifetime",
       "patch": "safe-item-lifetime.patch",
       "category": "safe",
-      "touched": ["ItemComponent"],
+      "touched": [
+        "ItemComponent"
+      ],
       "scenario": "default",
       "note": "道具寿命每 tick 递减 1 改为递减 2，只触及逻辑层一行"
     },
@@ -13,7 +15,9 @@
       "id": "boundary-bcl-regex",
       "patch": "boundary-new-bcl-dependency.patch",
       "category": "boundary",
-      "touched": ["ItemComponent"],
+      "touched": [
+        "ItemComponent"
+      ],
       "scenario": "default",
       "note": "补丁新增对 System.Text.RegularExpressions.Regex 的依赖。原按危险设计，实测补丁路径照常跑完，改归边界；完整验证的判定待云上实测后填入 measured"
     },
@@ -24,6 +28,106 @@
       "touched": [],
       "scenario": "default",
       "note": "母包侧 MonoBehaviour 持有热更类型的字段，AOT 程序集引用热更程序集；实测构建期失败，GenerateStripedAOTDlls failed"
+    },
+    {
+      "id": "safe-platform-speed",
+      "patch": "safe-platform-speed.patch",
+      "category": "safe",
+      "touched": [
+        "PlatformComponent"
+      ],
+      "scenario": "default",
+      "note": "平台移动速度 0.1 改为 0.2；平台每帧都在移动。类别为待实测的预期"
+    },
+    {
+      "id": "safe-gravity",
+      "patch": "safe-gravity.patch",
+      "category": "safe",
+      "touched": [
+        "PhysicsBodyComponent"
+      ],
+      "scenario": "default",
+      "note": "下落时的重力加速度加倍；场景里没有地面，角色每帧都在下落。类别为待实测的预期"
+    },
+    {
+      "id": "safe-stock-count",
+      "patch": "safe-stock-count.patch",
+      "category": "safe",
+      "touched": [
+        "CharacterComponent"
+      ],
+      "scenario": "default",
+      "note": "初始命数 3 改为 2，对局提前结束。类别为待实测的预期"
+    },
+    {
+      "id": "boundary-item-new-field",
+      "patch": "boundary-item-new-field.patch",
+      "category": "boundary",
+      "touched": [
+        "ItemComponent"
+      ],
+      "scenario": "default",
+      "note": "给热更侧的道具组件加一个字段并赋值：组件存放在 AOT 侧的存储里，考验两边对布局的认识是否一致。类别为待实测的预期"
+    },
+    {
+      "id": "boundary-float-cast",
+      "patch": "boundary-float-cast.patch",
+      "category": "boundary",
+      "touched": [
+        "ItemComponent"
+      ],
+      "scenario": "default",
+      "note": "运行时把越界的浮点数转成整数，结果写进道具寿命：取决于转换语义。类别为待实测的预期"
+    },
+    {
+      "id": "boundary-struct-pack1",
+      "patch": "boundary-struct-pack1.patch",
+      "category": "boundary",
+      "touched": [
+        "PlatformComponent"
+      ],
+      "scenario": "default",
+      "note": "平台组件改为 Pack=1 的紧凑布局，组件按字节视图存放在 AOT 侧。类别为待实测的预期"
+    },
+    {
+      "id": "boundary-filter5",
+      "patch": "boundary-filter5.patch",
+      "category": "boundary",
+      "touched": [
+        "CharacterComponent"
+      ],
+      "scenario": "default",
+      "note": "每帧查角色时改用 5 个类型参数的过滤器：母包里没有的 AOT 泛型组合。类别为待实测的预期"
+    },
+    {
+      "id": "danger-aot-random-edit",
+      "patch": "danger-aot-random-edit.patch",
+      "category": "dangerous",
+      "touched": [
+        "ItemComponent"
+      ],
+      "scenario": "default",
+      "note": "改了母包里框架的随机数混合常数（AOT 程序集）：补丁带不过去，整包重编却生效，预期两边不一致。类别为待实测的预期"
+    },
+    {
+      "id": "danger-aot-api-signature",
+      "patch": "danger-aot-api-signature.patch",
+      "category": "dangerous",
+      "touched": [
+        "ItemComponent"
+      ],
+      "scenario": "default",
+      "note": "给母包里框架的 FromSeed 加一个带默认值的参数：热更代码重编后调用新签名，母包里没有，预期补丁运行时找不到方法。类别为待实测的预期"
+    },
+    {
+      "id": "danger-new-bcl-assembly",
+      "patch": "danger-new-bcl-assembly.patch",
+      "category": "dangerous",
+      "touched": [
+        "ItemComponent"
+      ],
+      "scenario": "default",
+      "note": "热更代码新用到 System.Xml，母包里没有这个程序集，预期补丁运行失败。类别为待实测的预期"
     }
   ]
 }

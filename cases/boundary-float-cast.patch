@@ -1,0 +1,14 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+@@ -82,7 +82,9 @@ namespace Brawler
+ 
+             ref var item = ref frame.Get<ItemComponent>(entity);
+             item.ItemType       = itemType;
+-            item.RemainingTicks = config.ItemLifetimeTicks;
++            // Out-of-range float to int at run time: the result depends on the conversion semantics
++            int scaled = (int)(frame.Tick * 1.0e9f);
++            item.RemainingTicks = config.ItemLifetimeTicks + (scaled < 0 ? 1 : 0);
+             item.EntityId = entity.ToId();
+ 
+             ref var transform = ref frame.Get<TransformComponent>(entity);

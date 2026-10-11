@@ -1,0 +1,12 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/BrawlerSimSetup.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/BrawlerSimSetup.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/BrawlerSimSetup.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/BrawlerSimSetup.cs
+@@ -56,7 +56,7 @@ namespace Brawler
+                 Waypoint2      = new FPVector3(+16.0f, 0.0f, +16.0f),
+                 Waypoint3      = new FPVector3(-16.0f, 0.0f, +16.0f),
+                 WaypointIndex  = 0,
+-                MoveSpeed      = FP64.FromDouble(0.1),
++                MoveSpeed      = FP64.FromDouble(0.2),
+                 MoveProgress   = FP64.Zero,
+             });
+ 

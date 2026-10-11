@@ -88,7 +88,7 @@ public static class CacheKeyBuilder
     {
         string manifest = Path.Combine(projectPath, "Packages", "manifest.json");
         return ForBaseline(
-            new[] { Path.Combine(projectPath, "Assets") },
+            new[] { Path.Combine(projectPath, "Assets") }.Concat(LocalPackageRoots(projectPath)).ToArray(),
             ExcludedFromKey,
             new Dictionary<string, string>
             {
@@ -99,8 +99,50 @@ public static class CacheKeyBuilder
     }
 
     /// <summary>
+    /// 工程以源码形式引用的包：包清单里 file: 指向的本地包，以及 Packages 下的嵌入包。
+    /// 它们和 Assets 一样被编译进母包，却不在 Assets 下。被测样例的运行时（com.xpturn.klotho）正是这样引用的：
+    /// 不计入则改了框架代码后，整包重编算出的键与母包基线相同，直接复用母包，比对却照常给出"一致"——
+    /// 裁决 005 担心的那种隐蔽的错误复用。按包名排序，键不随清单顺序变化。
+    /// </summary>
+    public static IReadOnlyList<string> LocalPackageRoots(string projectPath)
+    {
+        string packages = Path.Combine(projectPath, "Packages");
+        var roots = new SortedDictionary<string, string>(StringComparer.Ordinal);
+
+        string manifest = Path.Combine(packages, "manifest.json");
+        if (File.Exists(manifest))
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(manifest));
+            if (document.RootElement.TryGetProperty("dependencies", out var dependencies))
+            {
+                foreach (var dependency in dependencies.EnumerateObject())
+                {
+                    string? value = dependency.Value.GetString();
+                    if (value is not null && value.StartsWith("file:", StringComparison.Ordinal))
+                    {
+                        roots[dependency.Name] = Path.GetFullPath(Path.Combine(packages, value["file:".Length..]));
+                    }
+                }
+            }
+        }
+
+        if (Directory.Exists(packages))
+        {
+            foreach (string embedded in Directory.GetDirectories(packages))
+            {
+                if (File.Exists(Path.Combine(embedded, "package.json")))
+                {
+                    roots.TryAdd(Path.GetFileName(embedded), embedded);
+                }
+            }
+        }
+        return roots.Values.ToArray();
+    }
+
+    /// <summary>
     /// 目录内容的摘要：按相对路径排序后，逐个纳入路径与文件内容。
     /// 纳入路径是必要的——仅哈希内容时，改名或移动文件不会改变键。
+    /// Unity 不导入以 ~ 结尾或以 . 开头的目录与文件（如包里的 Server~、Samples~），它们不进构建，也不计入。
     /// </summary>
     public static string HashDirectory(string root) => HashDirectory(root, Array.Empty<string>());
 
@@ -122,6 +164,7 @@ public static class CacheKeyBuilder
         var entries = files
             .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
             .Where(p => !excluded.Any(d => p.StartsWith(d, StringComparison.OrdinalIgnoreCase)))
+            .Where(p => !p.Split('/').Any(segment => segment.EndsWith('~') || segment.StartsWith('.')))
             .OrderBy(p => p, StringComparer.Ordinal)
             .ToList();
 

@@ -1,0 +1,15 @@
+diff --git a/com.xpturn.klotho/Runtime/Deterministic/Random/DeterministicRandom.cs b/com.xpturn.klotho/Runtime/Deterministic/Random/DeterministicRandom.cs
+--- a/com.xpturn.klotho/Runtime/Deterministic/Random/DeterministicRandom.cs
++++ b/com.xpturn.klotho/Runtime/Deterministic/Random/DeterministicRandom.cs
+@@ -43,9 +43,9 @@ namespace xpTURN.Klotho.Deterministic.Random
+         /// <summary>
+         /// Creates a derived stream from a world seed, feature key, and optional index
+         /// </summary>
+-        public static DeterministicRandom FromSeed(ulong worldSeed, ulong featureKey, ulong index = 0)
++        public static DeterministicRandom FromSeed(ulong worldSeed, ulong featureKey, ulong index = 0, ulong salt = 0)
+         {
+-            ulong seed = Mix64(worldSeed, featureKey);
++            ulong seed = Mix64(worldSeed, featureKey ^ salt);
+             seed = Mix64(seed, index);
+ 
+             var rng = new DeterministicRandom();

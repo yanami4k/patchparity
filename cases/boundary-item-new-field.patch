@@ -1,0 +1,21 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Components/ItemComponent.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Components/ItemComponent.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Components/ItemComponent.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Components/ItemComponent.cs
+@@ -10,5 +10,6 @@ namespace Brawler
+         public int ItemType;         // 0=Shield, 1=Boost, 2=Bomb
+         public int RemainingTicks;   // Item lifetime
+         public long EntityId;        // EntityRef.ToId() — used as view registry key
++        public int SpawnTick;        // Tick the item was spawned on
+     }
+ }
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+@@ -84,6 +84,7 @@ namespace Brawler
+             item.ItemType       = itemType;
+             item.RemainingTicks = config.ItemLifetimeTicks;
+             item.EntityId = entity.ToId();
++            item.SpawnTick = frame.Tick;
+ 
+             ref var transform = ref frame.Get<TransformComponent>(entity);
+             transform.Position = new FPVector3(px, FP64.FromDouble(0.5), pz);

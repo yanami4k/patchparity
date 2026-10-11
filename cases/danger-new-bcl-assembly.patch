@@ -1,0 +1,14 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+@@ -72,6 +72,10 @@ namespace Brawler
+             var rng = DeterministicRandom.FromSeed(seedComp.Seed, FeatureKey, (ulong)frame.Tick);
+ 
+             int itemType = rng.NextIntInclusive(0, 2); // 0=Shield, 1=Boost, 2=Bomb
++            // A new dependency on System.Xml, which nothing in the base package uses
++            var doc = new System.Xml.XmlDocument();
++            doc.LoadXml("<item scale=\"1\"/>");
++            itemType *= int.Parse(doc.DocumentElement.GetAttribute("scale"));
+ 
+             FP64 px = rng.NextFixed(config.SpawnMinRange, config.SpawnMaxRange);
+             if (rng.NextBool()) px = -px;

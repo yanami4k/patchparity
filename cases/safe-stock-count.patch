@@ -1,0 +1,12 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+@@ -827,7 +827,7 @@ namespace Brawler
+ 
+             ref var character  = ref frame.Get<CharacterComponent>(entity);
+             character.PlayerId        = cmd.PlayerId;
+-            character.StockCount      = 3;
++            character.StockCount      = 2;
+ 
+             // Apply the tick-0 entitlement loadout seed for this player's chosen class. The seed
+             // (LoadoutSeedComponent) was written deterministically in OnInitializeWorld from each peer's
