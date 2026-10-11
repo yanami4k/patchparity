@@ -45,6 +45,14 @@ Get-ChildItem -Recurse D:\pp\patchparity | Unblock-File
 powershell -ExecutionPolicy Bypass -File D:\pp\patchparity\setup\install-toolchain.ps1
 ```
 
+**香港与中国大陆地域下载不到 Unity**：Unity 的下载地址按来访 IP 分流，这两个地域的请求会被重定向到
+`download.unitychina.cn`，那里只有中国版，没有国际版的 `6000.3.18f1`（阿里云香港实测 404）。脚本会在这一步停下并说明原因。
+此时从能访问国际站的机器下载下面两个安装包，放到 `D:\pp\downloads\` 下（文件名不变），再重跑 `install-toolchain.ps1`，
+它见到已有的安装包就直接用：
+
+- `https://download.unity3d.com/download_unity/5ebeb53e4c07/Windows64EditorInstaller/UnitySetup64-6000.3.18f1.exe`（约 4.2 GB）
+- `https://download.unity3d.com/download_unity/5ebeb53e4c07/TargetSupportInstaller/UnitySetup-Windows-IL2CPP-Support-for-Editor-6000.3.18f1.exe`（约 250 MB）
+
 脚本结束时若提示需要重启，先重启再继续。随后把 zip 解出的目录换成真正的 git 克隆（新开一个 PowerShell，
 让刚装好的 git 进入 PATH）：
 

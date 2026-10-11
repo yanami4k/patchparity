@@ -133,12 +133,24 @@ if ($Skip -notcontains 'UnityHub') {
 }
 
 # ── Unity 编辑器与 IL2CPP 模块 ────────────────────────────
+# Unity 按来访 IP 分流：中国大陆与香港的请求被重定向到 download.unitychina.cn，那里只有中国版，没有国际版的这个版本
+# （阿里云香港实测 404）。下载不到时把安装包放进下载目录再重跑，Get-Download 见到已有文件就直接用
+function Get-UnityInstaller([string]$url, [string]$fileName) {
+    try {
+        return Get-Download $url $fileName
+    } catch {
+        throw ("下载不到 $fileName。Unity 的下载地址在中国大陆与香港会被重定向到 download.unitychina.cn，" +
+            "那里没有国际版 $UnityVersion。请从能访问国际站的机器下载 $url，放到 $($Paths.Downloads) 下，再重跑本脚本" +
+            "（见 setup\README.md）。原始错误：$($_.Exception.Message)")
+    }
+}
+
 if ($Skip -notcontains 'Unity') {
     Write-Step "Unity $UnityVersion（装在 $($Paths.UnityDir)）"
     if (Test-Path $Paths.UnityExe) {
         Write-Host '  编辑器已安装'
     } else {
-        $installer = Get-Download $Urls.UnityEditor "UnitySetup64-$UnityVersion.exe"
+        $installer = Get-UnityInstaller $Urls.UnityEditor "UnitySetup64-$UnityVersion.exe"
         # NSIS 安装器的 /D= 必须是最后一个参数，且路径不加引号
         Install-Exe $installer @('/S', "/D=$($Paths.UnityDir)") | Out-Null
         if (-not (Test-Path $Paths.UnityExe)) { throw "编辑器安装后仍找不到 $($Paths.UnityExe)" }
@@ -149,7 +161,7 @@ if ($Skip -notcontains 'Unity') {
     if (Test-Path $il2cpp) {
         Write-Host '  IL2CPP 模块已安装'
     } else {
-        $installer = Get-Download $Urls.UnityIl2cpp "UnitySetup-Windows-IL2CPP-Support-for-Editor-$UnityVersion.exe"
+        $installer = Get-UnityInstaller $Urls.UnityIl2cpp "UnitySetup-Windows-IL2CPP-Support-for-Editor-$UnityVersion.exe"
         # 模块安装器的 /D 指向编辑器根目录（含 Editor 子目录的那一层），不是 Editor 本身
         Install-Exe $installer @('/S', "/D=$($Paths.UnityDir)") | Out-Null
         if (-not (Test-Path $il2cpp)) { throw "IL2CPP 模块安装后仍找不到 $il2cpp" }
