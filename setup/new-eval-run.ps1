@@ -56,7 +56,7 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 [IO.File]::WriteAllText((Join-Path $out '.pigeon\mcp.json'), ($governance | ConvertTo-Json -Depth 6), $utf8)
 
 # 题目目录按本机路径现场生成（含改动用例与命令行程序的绝对路径），不入库；判分由其中的 verify.mjs 调 patchparity judge
-$tasks = Join-Path $PatchParityRoot 'eval	asks'
+$tasks = Join-Path $PatchParityRoot 'eval\tasks'
 Invoke-Native 'node' @((Join-Path $PatchParityRoot 'eval\generate-tasks.mjs'), '--cli', $cliExe, '--out', $tasks)
 
 $streamFn = Join-Path $Paths.Pigeon 'local\deepseek-stream-fn.mjs'
