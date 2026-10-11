@@ -182,7 +182,7 @@ public class VerificationPlanTests : IDisposable
         cache.Invalidate(FixedKey);
         VerificationReport report = Plan(launcher, cache).Verify(Case());
 
-        Assert.Equal(Verdict.PatchFailed, report.Verdict);
+        Assert.Equal(Verdict.Void, report.Verdict);
         Assert.False(cache.Lookup(FixedKey).Hit);
     }
 
@@ -269,7 +269,8 @@ public class VerificationPlanTests : IDisposable
 
         VerificationReport report = Plan(launcher).Verify(Case());
 
-        Assert.Equal(Verdict.PatchFailed, report.Verdict);
+        // 补丁尚未施加，失败的是环境：判作废而不是补丁失败
+        Assert.Equal(Verdict.Void, report.Verdict);
         Assert.Single(report.Steps);
     }
 

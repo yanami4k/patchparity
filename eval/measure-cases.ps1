@@ -30,7 +30,7 @@ if (-not (Test-Path $summary)) {
 }
 
 # 命令行 verify 的退出码（src/PatchParity.Cli/VerifyCommand.cs）
-$verdicts = @{ 0 = 'equivalent'; 3 = 'divergent'; 4 = 'void'; 5 = 'patch_failed'; 6 = 'workspace_busy'; 7 = 'workspace_dirty'; 2 = 'usage'; 9 = 'error' }
+$verdicts = @{ 0 = 'equivalent'; 3 = 'divergent'; 4 = 'void'; 5 = 'patch_failed'; 8 = 'rebuild_failed'; 6 = 'workspace_busy'; 7 = 'workspace_dirty'; 2 = 'usage'; 9 = 'error' }
 
 $manifest = Get-Content (Join-Path $PatchParityRoot 'cases\cases.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($case in $manifest.cases) {

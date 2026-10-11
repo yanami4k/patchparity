@@ -2,3 +2,8 @@
 *.patch text eol=lf
 # PowerShell 5.1 按 BOM 认 UTF-8，脚本里有中文；换行保持 CRLF，避免在 Windows 上被改动
 *.ps1 text eol=crlf
+# 注入代码一律 CRLF：被测样例按 autocrlf=true 检出，git apply 碰过的文件会被整篇写成 CRLF；
+# 注入时若是 LF，施加再撤销一个触及注入代码的用例后内容字节就变了，母包基线的缓存键随之失效（云主机实测）
+injected/** text eol=crlf
+# 其下的补丁仍按 LF（同上第一条），须写在后面以覆盖上一条
+injected/**/*.patch text eol=lf

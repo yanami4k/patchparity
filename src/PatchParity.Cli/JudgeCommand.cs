@@ -93,6 +93,7 @@ public static class JudgeCommand
         Verdict.Equivalent => "equivalent",
         Verdict.Divergent => "divergent",
         Verdict.PatchFailed => "patch_failed",
+        Verdict.RebuildFailed => "rebuild_failed",
         Verdict.Void => "void",
         _ => "incomplete",
     };
@@ -134,7 +135,8 @@ public static class JudgeCommand
                             "equivalent" => Verdict.Equivalent,
                             "divergent" => Verdict.Divergent,
                             "patch_failed" => Verdict.PatchFailed,
-                            _ => throw new ArgumentException("实测结论只能是 equivalent、divergent 或 patch_failed：" + value),
+                            "rebuild_failed" => Verdict.RebuildFailed,
+                            _ => throw new ArgumentException("实测结论只能是 equivalent、divergent、patch_failed 或 rebuild_failed：" + value),
                         };
                         break;
                     case "--touched":

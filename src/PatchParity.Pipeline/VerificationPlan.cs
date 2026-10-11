@@ -17,6 +17,12 @@ public enum Verdict
 
     /// <summary>证据不全：后面的步骤还没做。只出现在从台账还原的验证里，命令行一路总会跑到定论。</summary>
     Incomplete,
+
+    /// <summary>
+    /// 整包重编失败：标准答案一侧构建不出来或跑不完，补丁路径则已跑通。
+    /// 这类改动连完整构建都过不了，而热更补丁照常装得上——改动里母包那部分被悄悄丢掉了（如 AOT 程序集引用热更程序集）。
+    /// </summary>
+    RebuildFailed,
 }
 
 public sealed record VerificationReport

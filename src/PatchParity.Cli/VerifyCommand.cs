@@ -72,6 +72,7 @@ public static class VerifyCommand
             Verdict.Equivalent => 0,
             Verdict.Divergent => 3,
             Verdict.Void => 4,
+            Verdict.RebuildFailed => 8,
             _ => 5,
         };
     }
@@ -125,6 +126,14 @@ public static class VerifyCommand
                     Console.WriteLine($"  {report.Failure.Message}");
                 }
                 break;
+            case Verdict.RebuildFailed:
+                Console.WriteLine($"判定: 整包重编失败（{Describe(report.Failure!.Stage)}），补丁路径已跑通");
+                Console.WriteLine($"  {report.Reason}");
+                if (report.Failure.Message is not null)
+                {
+                    Console.WriteLine($"  {report.Failure.Message}");
+                }
+                break;
             case Verdict.Void:
                 Console.WriteLine("判定: 作废");
                 Console.WriteLine($"  {report.Reason}");
@@ -158,7 +167,7 @@ public static class VerifyCommand
                              [--seed 42] [--ticks 600] [--players 2] [--bots 0]
                              [--cache <缓存目录，缺省为产物目录下的 baseline-cache>] [--no-cache]
 
-        退出码: 0 一致 / 3 不一致 / 4 作废 / 5 补丁失败 / 6 工作区被占用 / 7 工作区有无法恢复的残留 / 2 用法错误
+        退出码: 0 一致 / 3 不一致 / 4 作废 / 5 补丁失败 / 8 整包重编失败 / 6 工作区被占用 / 7 工作区有无法恢复的残留 / 2 用法错误
         """);
 
     private sealed class Options

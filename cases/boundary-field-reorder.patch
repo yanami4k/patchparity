@@ -1,12 +1,13 @@
 diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Components/PlatformComponent.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Components/PlatformComponent.cs
 --- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Components/PlatformComponent.cs
 +++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Components/PlatformComponent.cs
-@@ -5,7 +5,7 @@ using xpTURN.Klotho.ECS;
- namespace Brawler
- {
-     [KlothoComponent(101, MaxCount = 64)]
--    [StructLayout(LayoutKind.Sequential, Pack = 4)]
-+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+@@ -8,8 +8,8 @@ namespace Brawler
+     [StructLayout(LayoutKind.Sequential, Pack = 4)]
      public partial struct PlatformComponent : IComponent
      {
-         public bool IsMoving;
+-        public bool IsMoving;
+         public FPVector3 Waypoint0;
++        public bool IsMoving;
+         public FPVector3 Waypoint1;
+         public FPVector3 Waypoint2;
+         public FPVector3 Waypoint3;

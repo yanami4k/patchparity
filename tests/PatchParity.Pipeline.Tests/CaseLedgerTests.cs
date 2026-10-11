@@ -89,6 +89,28 @@ public class CaseLedgerTests : IDisposable
     }
 
     [Fact]
+    public void 整包重编失败而补丁路径已跑通时判为整包重编失败()
+    {
+        // 云主机实测：AOT 程序集引用热更程序集的改动，补丁路径照常跑完，整包重编构建期失败
+        var entries = FullRun().Take(4).ToList();
+        entries.Add(new LedgerEntry { Step = LedgerSteps.RebuildBuild, Ok = false, Package = "rebuilt", FailureStage = "Build" });
+
+        CaseDecision decision = Judge(entries);
+
+        Assert.Equal(Verdict.RebuildFailed, decision.Verdict);
+        Assert.Equal(FailureStage.Build, decision.Failure!.Stage);
+    }
+
+    [Fact]
+    public void 母包基线构建失败判为作废而非补丁失败()
+    {
+        // 补丁尚未施加，失败的是环境
+        var entries = new List<LedgerEntry> { new() { Step = LedgerSteps.BaselineBuild, Ok = false, FailureStage = "Build" } };
+
+        Assert.Equal(Verdict.Void, Judge(entries).Verdict);
+    }
+
+    [Fact]
     public void 补丁运行失败判为补丁失败并保留已知故障()
     {
         var entries = FullRun().Take(2).ToList();
@@ -144,7 +166,8 @@ public class CaseLedgerTests : IDisposable
         var entries = FullRun();
         File.Delete(entries[5].Csv!);
 
-        Assert.Equal(Verdict.PatchFailed, Judge(entries).Verdict);
+        // 缺的是整包重编那次运行的哈希：失败在标准答案一侧
+        Assert.Equal(Verdict.RebuildFailed, Judge(entries).Verdict);
     }
 
     [Fact]
@@ -231,6 +254,8 @@ public class CaseLedgerTests : IDisposable
     [InlineData(Verdict.PatchFailed, ExpectedVerdict.Dangerous, null, true)]
     [InlineData(Verdict.Divergent, ExpectedVerdict.Dangerous, null, true)]
     [InlineData(Verdict.Equivalent, ExpectedVerdict.Dangerous, null, false)]
+    [InlineData(Verdict.RebuildFailed, ExpectedVerdict.Dangerous, null, true)]
+    [InlineData(Verdict.RebuildFailed, ExpectedVerdict.Safe, null, false)]
     [InlineData(Verdict.Equivalent, ExpectedVerdict.Boundary, Verdict.Equivalent, true)]
     [InlineData(Verdict.PatchFailed, ExpectedVerdict.Boundary, Verdict.Equivalent, false)]
     [InlineData(Verdict.Incomplete, ExpectedVerdict.Boundary, null, false)]

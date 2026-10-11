@@ -19,7 +19,8 @@
         "ItemComponent"
       ],
       "scenario": "default",
-      "note": "补丁新增对 System.Text.RegularExpressions.Regex 的依赖。原按危险设计，实测补丁路径照常跑完，改归边界；完整验证的判定待云上实测后填入 measured"
+      "note": "补丁新增对 System.Text.RegularExpressions.Regex 的依赖。原按危险设计，实测照常运行；2026-10-11 云上完整验证判为等价",
+      "measured": "equivalent"
     },
     {
       "id": "danger-aot-refs-hot",
@@ -27,7 +28,7 @@
       "category": "dangerous",
       "touched": [],
       "scenario": "default",
-      "note": "母包侧 MonoBehaviour 持有热更类型的字段，AOT 程序集引用热更程序集；实测构建期失败，GenerateStripedAOTDlls failed"
+      "note": "母包侧启动器持有热更类型的字段，AOT 程序集引用热更程序集。2026-10-11 云上实测：补丁路径照常跑完（启动器的改动没有随补丁生效），整包重编构建期失败，判为整包重编失败"
     },
     {
       "id": "safe-platform-speed",
@@ -37,7 +38,7 @@
         "PlatformComponent"
       ],
       "scenario": "default",
-      "note": "平台移动速度 0.1 改为 0.2；平台每帧都在移动。类别为待实测的预期"
+      "note": "平台移动速度 0.1 改为 0.2；平台每帧都在移动。2026-10-11 云上实测等价"
     },
     {
       "id": "safe-gravity",
@@ -47,7 +48,7 @@
         "PhysicsBodyComponent"
       ],
       "scenario": "default",
-      "note": "下落时的重力加速度加倍；场景里没有地面，角色每帧都在下落。类别为待实测的预期"
+      "note": "下落时的重力加速度加倍；场景里没有地面，角色每帧都在下落。2026-10-11 云上实测等价"
     },
     {
       "id": "safe-stock-count",
@@ -57,7 +58,7 @@
         "CharacterComponent"
       ],
       "scenario": "default",
-      "note": "初始命数 3 改为 2，对局提前结束。类别为待实测的预期"
+      "note": "初始命数 3 改为 2，对局提前结束。2026-10-11 云上实测等价"
     },
     {
       "id": "boundary-item-new-field",
@@ -67,7 +68,8 @@
         "ItemComponent"
       ],
       "scenario": "default",
-      "note": "给热更侧的道具组件加一个字段并赋值：组件存放在 AOT 侧的存储里，考验两边对布局的认识是否一致。类别为待实测的预期"
+      "note": "给热更侧的道具组件加一个字段并赋值：组件存放在 AOT 侧的存储里，考验两边对布局的认识是否一致。2026-10-11 云上实测等价：两条路径都由解释器执行玩法代码",
+      "measured": "equivalent"
     },
     {
       "id": "boundary-float-cast",
@@ -77,17 +79,18 @@
         "ItemComponent"
       ],
       "scenario": "default",
-      "note": "运行时把越界的浮点数转成整数，结果写进道具寿命：取决于转换语义。类别为待实测的预期"
+      "note": "运行时把越界的浮点数转成整数，结果写进道具寿命：取决于转换语义。2026-10-11 云上实测等价：两条路径都由解释器执行玩法代码",
+      "measured": "equivalent"
     },
     {
-      "id": "boundary-struct-pack1",
-      "patch": "boundary-struct-pack1.patch",
+      "id": "boundary-field-reorder",
+      "patch": "boundary-field-reorder.patch",
       "category": "boundary",
       "touched": [
         "PlatformComponent"
       ],
       "scenario": "default",
-      "note": "平台组件改为 Pack=1 的紧凑布局，组件按字节视图存放在 AOT 侧。类别为待实测的预期"
+      "note": "调换平台组件里两个字段的顺序：组件布局与哈希的字段顺序都变了，组件按字节视图存放在 AOT 侧。替换原 Pack=1 的题（被 Klotho 的分析器 KLOTHO_STRUCT_LAYOUT_MISSING 拒绝，编译不过，测的不是热更）。待实测"
     },
     {
       "id": "boundary-filter5",
@@ -97,7 +100,8 @@
         "CharacterComponent"
       ],
       "scenario": "default",
-      "note": "每帧查角色时改用 5 个类型参数的过滤器：母包里没有的 AOT 泛型组合。类别为待实测的预期"
+      "note": "每帧查角色时改用 5 个类型参数的过滤器：母包里没有的 AOT 泛型组合。2026-10-11 云上实测等价：两条路径都由解释器执行玩法代码",
+      "measured": "equivalent"
     },
     {
       "id": "danger-aot-random-edit",
@@ -107,7 +111,7 @@
         "ItemComponent"
       ],
       "scenario": "default",
-      "note": "改了母包里框架的随机数混合常数（AOT 程序集）：补丁带不过去，整包重编却生效，预期两边不一致。类别为待实测的预期"
+      "note": "改了母包里框架的随机数混合常数（AOT 程序集），补丁带不过去而整包重编生效。2026-10-11 云上实测不等价：首个分歧 tick 0，分歧层 Transform、PhysicsBody、Character、SpawnMarker"
     },
     {
       "id": "danger-aot-api-signature",
@@ -117,17 +121,18 @@
         "ItemComponent"
       ],
       "scenario": "default",
-      "note": "给母包里框架的 FromSeed 加一个带默认值的参数：热更代码重编后调用新签名，母包里没有，预期补丁运行时找不到方法。类别为待实测的预期"
+      "note": "给母包里框架的 FromSeed 加一个带默认值的参数，热更代码重编后调用新签名。2026-10-11 云上实测补丁运行期失败：MissingMethodException DeterministicRandom::FromSeed"
     },
     {
-      "id": "danger-new-bcl-assembly",
-      "patch": "danger-new-bcl-assembly.patch",
-      "category": "dangerous",
+      "id": "boundary-xml-assembly",
+      "patch": "boundary-new-xml-dependency.patch",
+      "category": "boundary",
+      "measured": "equivalent",
       "touched": [
         "ItemComponent"
       ],
       "scenario": "default",
-      "note": "热更代码新用到 System.Xml，母包里没有这个程序集，预期补丁运行失败。类别为待实测的预期"
+      "note": "热更代码新用到 System.Xml。原按危险设计（预期母包里没有这个程序集），2026-10-11 云上实测等价，复现不出失败，按规则改归边界"
     }
   ]
 }

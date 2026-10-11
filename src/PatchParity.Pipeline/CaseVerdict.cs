@@ -50,8 +50,8 @@ public static class CaseVerdict
         // 一、母包基线
         if (e.BaselineBuild is { Succeeded: false } baseline)
         {
-            // 此时补丁尚未施加，严格说是环境问题而非补丁问题；沿用命令行一直以来的判法，是否改判另议
-            return Failed(baseline.Failure, "母包基线构建失败，无从验证");
+            // 此时补丁尚未施加，失败的是环境而不是补丁：没有母包就无从比对，判作废
+            return new CaseDecision { Verdict = Verdict.Void, Failure = baseline.Failure, Reason = "母包基线构建失败，无从验证" };
         }
         if (!e.BaselineReady)
         {
@@ -118,7 +118,7 @@ public static class CaseVerdict
         }
         if (!e.Rebuild.Succeeded)
         {
-            return Failed(e.Rebuild.Failure, "整包重编失败，无法取得比对基准");
+            return RebuildFailed(e.Rebuild.Failure, "整包重编失败，无法取得比对基准；补丁路径却已跑通，改动里母包那部分没有随补丁生效");
         }
         if (e.RebuildRun is null)
         {
@@ -126,7 +126,7 @@ public static class CaseVerdict
         }
         if (!e.RebuildRun.Succeeded)
         {
-            return Failed(e.RebuildRun.Failure, "整包重编的产物未能跑完场景");
+            return RebuildFailed(e.RebuildRun.Failure, "整包重编的产物未能跑完场景");
         }
 
         ComparisonResult comparison = SeriesComparer.Compare(HashSeries.Load(e.RebuildRun.CsvPath!), patchSeries);
@@ -143,12 +143,16 @@ public static class CaseVerdict
     public static bool Matches(Verdict verdict, ExpectedVerdict expected, Verdict? measured = null) => expected switch
     {
         ExpectedVerdict.Safe => verdict == Verdict.Equivalent,
-        ExpectedVerdict.Dangerous => verdict is Verdict.Divergent or Verdict.PatchFailed,
+        // 整包重编失败也算识别出危险：这类改动热更补丁装得上，却悄悄丢了母包那部分
+        ExpectedVerdict.Dangerous => verdict is Verdict.Divergent or Verdict.PatchFailed or Verdict.RebuildFailed,
         _ => measured is { } m ? verdict == m : verdict is not (Verdict.Incomplete or Verdict.Void),
     };
 
     private static CaseDecision Failed(FailureReport failure, string reason) =>
         new() { Verdict = Verdict.PatchFailed, Failure = failure, Reason = reason };
+
+    private static CaseDecision RebuildFailed(FailureReport failure, string reason) =>
+        new() { Verdict = Verdict.RebuildFailed, Failure = failure, Reason = reason };
 
     private static CaseDecision Incomplete(string reason, DeterminismCheck? determinism = null, CoverageCheck? coverage = null) =>
         new() { Verdict = Verdict.Incomplete, Reason = "证据不全：" + reason, Determinism = determinism, Coverage = coverage };
