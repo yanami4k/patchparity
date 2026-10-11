@@ -130,8 +130,13 @@ if ($SkipUnity) {
     Write-Step '跳过 Unity 相关步骤（-SkipUnity）'
 } else {
     Write-Step 'HybridCLR：打开工程并运行安装器（第一次要导入整个工程，可能要半小时以上）'
-    $marker = Join-Path $Paths.Project 'HybridCLRData\LocalIl2CppData-WindowsEditor\il2cpp'
-    if (Test-Path $marker) {
+    # 以 HybridCLR 自己写下的版本文件判断是否装好。安装器的 HasInstalledHybridCLR 在这个版本里读出来是空的
+    # （本机与云主机的安装报告都如此，而安装其实成功了），不能拿它当依据
+    $versionFile = Join-Path $Paths.Project 'HybridCLRData\LocalIl2CppData-WindowsEditor\il2cpp\libil2cpp\hybridclr\generated\libil2cpp-version.txt'
+    function Test-HybridClrInstalled {
+        (Test-Path $versionFile) -and ((Get-Content $versionFile -Raw).Trim() -eq $HybridClrVersion)
+    }
+    if (Test-HybridClrInstalled) {
         Write-Host '  已安装'
     } else {
         $report = Join-Path $Paths.SetupLogs 'hybridclr-install.txt'
@@ -160,8 +165,10 @@ if ($SkipUnity) {
             }
             Start-Sleep -Seconds 10
         }
-        $result = (Get-Content $report -Raw).Trim()
-        if ($result -ne 'HasInstalledHybridCLR=True') { throw "HybridCLR 安装未成功：$result，见日志 $log" }
+        if (-not (Test-HybridClrInstalled)) {
+            $found = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { '没有版本文件' }
+            throw "HybridCLR 安装未成功：期望版本 $HybridClrVersion，实际 $found，见日志 $log"
+        }
         Write-Host '  完成'
     }
 }

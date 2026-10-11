@@ -30,6 +30,8 @@ $PigeonCommit = '65ff318'
 $UnityVersion = '6000.3.18f1'
 $UnityChangeset = '5ebeb53e4c07'
 $DotnetSdkVersion = '8.0.425'
+# HybridCLR：环境补丁里包清单锁定的版本，安装后写进 libil2cpp-version.txt
+$HybridClrVersion = '8.14.1'
 $NodeVersion = '24.12.0'   # Pigeon 的 .nvmrc
 $GitVersionTag = 'v2.56.0.windows.2'
 $GitInstallerName = 'Git-2.56.0.2-64-bit.exe'
