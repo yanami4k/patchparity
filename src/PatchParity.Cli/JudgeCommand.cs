@@ -66,7 +66,9 @@ public static class JudgeCommand
         var layers = new JsonArray();
         foreach (LayerDifference layer in decision.Comparison?.DivergentLayers ?? Array.Empty<LayerDifference>())
         {
-            layers.Add(layer.Layer);
+            // 须先转成 JsonNode：泛型的 Add<string> 存的是待序列化的值，输出时要靠反射解析器，下面的选项没有配它，
+            // 分歧层一非空就抛异常（云上经 Pigeon 判"不等价"的题时实测：判定已算出，摘要却输出不了，题目被记为失败）
+            layers.Add((JsonNode)layer.Layer);
         }
         summary["divergent_layers"] = layers;
         summary["failure_stage"] = decision.Failure?.Stage.ToString();
@@ -83,6 +85,7 @@ public static class JudgeCommand
         summary["total_seconds"] = Math.Round(entries.Sum(e => e.Seconds), 1);
         Console.WriteLine(summary.ToJsonString(new JsonSerializerOptions
         {
+            TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         }));
         return matches ? 0 : 1;

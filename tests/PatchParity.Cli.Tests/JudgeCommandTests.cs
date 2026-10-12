@@ -83,6 +83,40 @@ public class JudgeCommandTests : IDisposable
     }
 
     [Fact]
+    public void 判为不等价时摘要带上分歧tick与分歧层()
+    {
+        // 云上经 Pigeon 实测：判定为不等价时输出摘要抛异常，退出码 9，危险题被误记为失败
+        string patched = Path.Combine(_root, "patched.csv");
+        string rebuilt = Path.Combine(_root, "rebuilt.csv");
+        File.WriteAllText(patched, Csv);
+        File.WriteAllText(rebuilt, "tick,total,c:ItemComponent:count,c:ItemComponent:hash\n0,1,1,10\n1,9,1,99\n");
+        var ledger = new CaseLedger(Ledger);
+        ledger.Record(new LedgerEntry { Step = LedgerSteps.BaselineBuild, Ok = true, Package = "base", CacheHit = true });
+        ledger.Record(new LedgerEntry { Step = LedgerSteps.PatchCompile, Ok = true, PatchName = "x" });
+        foreach (string name in new[] { "p1", "p2" })
+        {
+            ledger.Record(new LedgerEntry
+            {
+                Step = LedgerSteps.Run, Ok = true, RunKind = LedgerSteps.Patched, RunName = name, Package = "base",
+                PatchName = "x", Scenario = "default", Csv = patched,
+            });
+        }
+        ledger.Record(new LedgerEntry { Step = LedgerSteps.RebuildBuild, Ok = true, Package = "rebuilt" });
+        ledger.Record(new LedgerEntry
+        {
+            Step = LedgerSteps.Run, Ok = true, RunKind = LedgerSteps.Rebuild, RunName = "r", Package = "rebuilt",
+            Scenario = "default", Csv = rebuilt,
+        });
+
+        (int code, JsonObject summary) = Judge(Ledger, "--expect", "dangerous", "--touched", "ItemComponent");
+
+        Assert.Equal(0, code);
+        Assert.Equal("divergent", summary["verdict"]!.GetValue<string>());
+        Assert.Equal(1, summary["first_divergent_tick"]!.GetValue<int>());
+        Assert.Contains("c:ItemComponent:hash", summary["divergent_layers"]!.AsArray().Select(n => n!.GetValue<string>()));
+    }
+
+    [Fact]
     public void 不符合预期时退出码为1()
     {
         WriteEquivalentLedger();
