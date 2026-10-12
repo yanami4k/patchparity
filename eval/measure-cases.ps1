@@ -63,9 +63,13 @@ foreach ($case in $manifest.cases) {
 
         $log = Join-Path $out "$($case.id)-$($run.Label).log"
         $started = Get-Date
-        # 直接重定向到文件：命令行以 UTF-8 输出中文，经 PowerShell 管道会按控制台代码页转码成乱码
+        # 直接重定向到文件：命令行以 UTF-8 输出中文，经 PowerShell 管道会按控制台代码页转码成乱码。
+        # 不用 Start-Process -Wait：Windows PowerShell 的 -Wait 要等整棵进程树退出，而 Unity 编译时拉起的
+        # .NET 编译服务器会闲置驻留约十分钟，每一题都白等（云上实测）。只等命令行程序本身
         $process = Start-Process -FilePath $cli -ArgumentList ($arguments | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }) `
-            -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+            -NoNewWindow -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+        $null = $process.Handle   # 先取句柄：否则进程退出后 Windows PowerShell 读不到 ExitCode
+        $process.WaitForExit()
         $minutes = [math]::Round(((Get-Date) - $started).TotalMinutes, 1)
         $verdict = if ($verdicts.ContainsKey($process.ExitCode)) { $verdicts[$process.ExitCode] } else { "exit$($process.ExitCode)" }
 
