@@ -75,8 +75,9 @@ MCP 服务端（`src/PatchParity.Mcp`）提供 7 个工具：`list_scenarios`、
 - 服务端只记事实、不下结论：每完成一步就写进台账 `patchparity-ledger.json`；
   `patchparity judge` 用与命令行同一套规则从台账判定。Agent 说什么都不影响判分。
 - 会话隔离：同一时刻只允许一个会话改动被测工程（工作区租约），施加改动前先记日志，服务端被强杀后，下一个会话开工前按日志恢复源码。
-- 用 [Pigeon](https://github.com/yanami4k/pigeon)（同一作者的 Agent 编排与评测工具）的 `pigeon eval` 跑题，
-  模型为 DeepSeek `deepseek-v4-flash`。
+- 用 [Pigeon](https://github.com/yanami4k/pigeon)（同一作者的 Agent 编排工具）的 `pigeon eval` 跑题，模型为 DeepSeek `deepseek-v4-flash`。
+  Pigeon 冻结在 `65ff318`，`setup/` 取的就是这个提交；之后的版本移除了这个跑题器，换用新版要另写跑题入口，
+  判定在 patchparity 一侧，不受影响。
 
 ## 结果
 
@@ -144,4 +145,4 @@ patchparity verify --unity <Unity.exe> --project <Klotho>\Samples\Brawler --repo
 ## 依赖
 
 [Unity](https://unity.com/) 6000.3.18f1 · [HybridCLR](https://github.com/focus-creative-games/hybridclr) v8.14.1 ·
-[Klotho](https://github.com/xpTURN/Klotho)（被测样例）· .NET 8 · [Pigeon](https://github.com/yanami4k/pigeon)（Agent 编排与评测）
+[Klotho](https://github.com/xpTURN/Klotho)（被测样例）· .NET 8 · [Pigeon](https://github.com/yanami4k/pigeon) `65ff318`（Agent 编排与跑题）
