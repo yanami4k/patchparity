@@ -6,7 +6,7 @@
 依次完成：
   1. 被测样例：按锁定提交取 Klotho，打环境补丁，复制注入代码与 HybridCLR 设置。
   2. patchparity：跑两套测试，把 MCP 服务端与命令行发布成自包含程序。
-  3. Pigeon：克隆并检出冻结点，安装依赖，放入 DeepSeek 的 stream-fn 模块。
+  3. Pigeon：克隆并检出锁定点，安装依赖，放入 DeepSeek 的 stream-fn 模块。
   4. HybridCLR：用 Unity 打开工程并运行安装器。第一次打开要导入整个工程，耗时较长。
 每一步先查是否已完成，已完成即跳过，可以反复运行。不需要管理员权限。
 
@@ -105,13 +105,20 @@ if (-not (Test-Path (Join-Path $pigeon '.git'))) {
     Invoke-Native 'git' @('clone', '-q', $(if ($PigeonSource) { $PigeonSource } else { $PigeonRepo }), $pigeon)
 }
 $pigeonHead = (& git -C $pigeon rev-parse --short=7 HEAD).Trim()
+$pigeonMoved = $false
 if ($pigeonHead -ne $PigeonCommit) {
+    # 锁定点可能比已有的克隆新（裁决 020 从 65ff318 换到新的锁定点）：本地没有这个提交就先取回
+    if (-not (Test-GitIn $pigeon @('cat-file', '-e', "$PigeonCommit^{commit}"))) {
+        Git-In $pigeon @('fetch', '-q', 'origin')
+    }
     Git-In $pigeon @('checkout', '-q', '--detach', $PigeonCommit)
+    $pigeonMoved = $true
 }
-# 冻结副本不改任何已跟踪文件（裁决 011）
-if (-not (Test-GitIn $pigeon @('diff', '--quiet', 'HEAD'))) { throw 'Pigeon 副本有改动，冻结副本不得修改' }
+# 锁定副本不改任何已跟踪文件（裁决 011、020）
+if (-not (Test-GitIn $pigeon @('diff', '--quiet', 'HEAD'))) { throw 'Pigeon 副本有改动，锁定副本不得修改' }
 
-if (-not (Test-Path (Join-Path $pigeon 'node_modules'))) {
+# 换了提交就重装依赖：旧的 node_modules 对不上新的锁文件
+if ($pigeonMoved -or -not (Test-Path (Join-Path $pigeon 'node_modules'))) {
     Push-Location $pigeon
     try { Invoke-Native 'npm' @('ci', '--no-audit', '--no-fund') } finally { Pop-Location }
 }

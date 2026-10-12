@@ -3,13 +3,14 @@
 # 目录布局（以 patchparity 克隆的上一级为根，缺省 D:\pp）：
 #   <根>\patchparity        本仓库
 #   <根>\vendor\Klotho      被测样例，锁定提交加环境补丁与注入代码
-#   <根>\pigeon             Pigeon 冻结副本
+#   <根>\pigeon             Pigeon 锁定副本
 #   <根>\tools\dotnet       .NET SDK（不进系统 PATH）
 #   <根>\Unity\<版本>       Unity 编辑器
 #   <根>\bin\mcp, bin\cli   自包含发布的 MCP 服务端与命令行
 #   <根>\artifacts          产物与母包基线缓存
+#   <根>\e\<名字>\<题号>    patchparity eval 每道题的工作目录
 #   <根>\downloads          安装包
-# 根路径要短：pigeon eval 的工作树路径约为输出目录长度加 85 个字符，Windows 有路径长度上限。
+# 根路径要短：每道题的工作目录下还有 Pigeon 的会话存档与 MCP 服务端的产物，Windows 有路径长度上限。
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -23,16 +24,16 @@ $PatchParityRepo = 'https://github.com/yanami4k/patchparity.git'
 # 被测样例：裁决 002
 $KlothoRepo = 'https://github.com/xpTURN/Klotho.git'
 $KlothoCommit = 'e29c4892c88db097f3ac0d135874c82e9b6726d6'
-# Pigeon 冻结点：裁决 011（已确认在 GitHub main 的历史里）
+# Pigeon 锁定点：裁决 020（原冻结于 65ff318，裁决 011；之后的版本移除了 pigeon eval，跑题改由 patchparity eval）
 $PigeonRepo = 'https://github.com/yanami4k/pigeon.git'
-$PigeonCommit = '65ff318'
+$PigeonCommit = '5e70ca2'
 # Unity：版本号与 changeset 取自环境补丁里的 ProjectVersion.txt
 $UnityVersion = '6000.3.18f1'
 $UnityChangeset = '5ebeb53e4c07'
 $DotnetSdkVersion = '8.0.425'
 # HybridCLR：环境补丁里包清单锁定的版本，安装后写进 libil2cpp-version.txt
 $HybridClrVersion = '8.14.1'
-$NodeVersion = '24.12.0'   # Pigeon 的 .nvmrc
+$NodeVersion = '24.12.0'   # Pigeon 的 package.json 要求 >=22.19.0 <25
 $GitVersionTag = 'v2.56.0.windows.2'
 $GitInstallerName = 'Git-2.56.0.2-64-bit.exe'
 

@@ -1,7 +1,7 @@
 # setup —— 在一台全新的 Windows 主机上搭建 patchparity
 
 本目录的脚本把一台空白的 Windows 主机变成能跑完整验证的工作区：装工具链、按锁定提交取被测样例并打环境补丁、
-发布 patchparity、取 Pigeon 冻结副本、为 `pigeon eval` 生成 MCP 配置。目标主机是阿里云香港的 Windows 云主机，
+发布 patchparity、取 Pigeon 锁定副本，之后可以让 Agent 成批跑题。目标主机是阿里云香港的 Windows 云主机，
 本机或其他 Windows 机器同样适用。
 
 整套流程首次约需两到三小时，大部分时间在下载、安装与 Unity 首次导入工程，人手操作只有第 1、2、4 步。
@@ -10,11 +10,10 @@
 |---|---|---|
 | `install-toolchain.ps1` | Git、Node、VS 生成工具（MSVC）、.NET SDK、Unity Hub、Unity 编辑器与 IL2CPP 模块 | 是（全部已装时否） |
 | `prepare-workspace.ps1` | 被测样例、注入代码、测试与发布、Pigeon、HybridCLR 安装 | 否 |
-| `new-eval-run.ps1` | 为一次 `pigeon eval` 跑批建输出目录并写入 MCP 配置 | 否 |
-| `run-eval.ps1` | 跑一批 `pigeon eval` 并汇总每题的判分与 judge 判定 | 否 |
+| `run-eval.ps1` | 生成题目，交给 `patchparity eval` 让 Agent 逐题做完并判分 | 否 |
 | `common.ps1` | 锁定的版本、下载地址、目录布局，由以上脚本引入 | — |
 
-各项版本都锁定在 `common.ps1` 里：Klotho `e29c489`（裁决 002）、Pigeon `65ff318`（裁决 011）、
+各项版本都锁定在 `common.ps1` 里：Klotho `e29c489`（裁决 002）、Pigeon `5e70ca2`（裁决 020）、
 Unity `6000.3.18f1`、.NET SDK `8.0.425`、Node `24.12.0`。下载地址于 2026-10-10 逐个核实可用。
 
 ## 1. 开云主机
@@ -62,7 +61,7 @@ Remove-Item -Recurse -Force D:\pp\patchparity
 git clone https://github.com/yanami4k/patchparity.git D:\pp\patchparity
 ```
 
-根目录取 `D:\pp` 这样的短路径：`pigeon eval` 在输出目录下开每题的工作树，路径会多出约 85 个字符。
+根目录取 `D:\pp` 这样的短路径：每道题的工作目录下还有 Pigeon 的会话存档，路径层次深，Windows 有路径长度上限。
 不要经目录联接或 `subst` 盘符访问它——Pigeon 的入口经这类路径调用时会静默不执行、退出码为 0。
 
 ## 3. 激活 Unity 许可证（只能手工）
@@ -86,8 +85,8 @@ powershell -ExecutionPolicy Bypass -File D:\pp\patchparity\setup\prepare-workspa
    并检查 `cases/` 里每份改动用例都能施加。被测样例的 `core.autocrlf` 设为 `true`，与制作补丁时的工作区一致。
 2. 跑两套测试，把 MCP 服务端与命令行发布成自包含程序（`D:\pp\bin\mcp`、`D:\pp\bin\cli`）。
    自包含是因为 Pigeon 只把白名单里的环境变量传给 MCP 服务端，`DOTNET_ROOT` 不在其中（裁决 015）。
-3. 克隆 Pigeon 并检出 `65ff318`，`npm ci`，把 `setup/pigeon/deepseek-stream-fn.mjs` 放进副本的 `local/`。
-   冻结副本的已跟踪文件一个不改（裁决 011）。
+3. 克隆 Pigeon 并检出 `5e70ca2`（已有的克隆里没有这个提交时先取回），`npm ci`，把 `setup/pigeon/deepseek-stream-fn.mjs`
+   放进副本的 `local/`。锁定副本的已跟踪文件一个不改（裁决 011、020）。
 4. 用 Unity 打开工程并运行 HybridCLR 安装器。第一次打开要导入整个工程，可能要半小时以上。
 
 每一步都先查是否已完成，中途失败修好原因后重跑即可。只想检查前三步时加 `-SkipUnity`。
@@ -110,56 +109,40 @@ D:\pp\bin\cli\patchparity.exe verify `
 预期：判定为等价，确定性自检与覆盖自检均通过，打印"与预期相符"，退出码 0。冷启动要建母包基线与整包重编，
 本机实测约 25 分钟；同一缓存目录第二次运行会命中母包基线。请把各步耗时记下来，云主机的成本结构要据此更新。
 
-## 6. 接 Pigeon
-
-```powershell
-powershell -ExecutionPolicy Bypass -File D:\pp\patchparity\setup\new-eval-run.ps1 -Name smoke
-```
-
-它做三件事：
-
-1. 在 `D:\pp\e\smoke` 下写两份 MCP 配置。风险档取 A：`list_scenarios` 为 read，其余 6 个为 write，跑批要加 `--yolo`（裁决 015）。
-2. 按 `cases/cases.json` 在 `D:\pp\patchparity\eval\tasks` 下生成题目目录，一道题一个子目录。题目目录含本机绝对路径，
-   不入库，每次重新生成。
-3. 打印 `pigeon eval` 的完整命令。
-
-先只跑一道题，把命令里的题目目录换成某一道题的子目录即可：
+## 6. 让 Agent 跑题
 
 ```powershell
 $env:DEEPSEEK_API_KEY = '<你的 key>'   # 只设在当前进程，不写进任何文件
-node D:\pp\pigeon\src\cli\index.ts eval D:\pp\patchparity\eval\tasks\safe-item-lifetime --out D:\pp\e\smoke `
-  --runs 1 --conditions none --skill D:\pp\e\smoke\unused-skills `
-  --stream-fn D:\pp\pigeon\local\deepseek-stream-fn.mjs --provider deepseek --model deepseek-v4-flash --yolo
+powershell -ExecutionPolicy Bypass -File D:\pp\patchparity\setup\run-eval.ps1 -Name smoke -Only safe-item-lifetime
 ```
 
-`pigeon eval` 不接受 `--concurrency`，传了会报未知参数退出；它本身逐题串行。`--runs 1 --conditions none --skill <任意路径>`
-都必须显式给。
+`run-eval.ps1` 做三件事：
 
-一道题的过程：Agent 照题面依次调用 patchparity 的工具，服务端每完成一步就把结果记进该题工作树里的
-`patchparity-ledger.json`；Agent 收工后，Pigeon 运行题目目录里的 `verify.mjs`，它调用 `patchparity judge`，用与命令行验证
-同一套规则从台账判定，并与预期比对。判定不采信 Agent 的说法（裁决 009），预期也不写在题面里。
+1. 按 `cases/cases.json` 在 `D:\pp\patchparity\eval\tasks` 下生成题目目录，一道题一个子目录（题面、预算、验证脚本）。
+   题目目录含本机绝对路径，不入库，每次重新生成。`-Only` 只生成 id 以此开头的题，不给则全部生成。
+2. 写一份 MCP 服务端的启动定义 `D:\pp\e\smoke\mcp-launch.json`。
+3. 调 `patchparity eval` 逐题跑。每道题建一个独立的工作目录 `D:\pp\e\smoke\<题号>`，放进 `.mcp.json` 与风险档
+   `.pigeon\settings.json`（风险档 A：`list_scenarios` 为 read，其余 6 个为 write，裁决 015），再用
+   `pigeon run --root <工作目录> --yolo --trust-config --json` 起 Agent，题面经标准输入送入。
+   会话检索、派 worker、联网、推送记忆与钩子一律关掉：Agent 只凭题面与 patchparity 的工具做题，题与题之间也看不到彼此的会话。
+
+一道题的过程：Agent 照题面依次调用 patchparity 的工具，服务端每完成一步就把结果记进工作目录里的 `patchparity-ledger.json`；
+Agent 收工后（正常结束、撞上轮次或墙钟上限都一样），跑题器在工作目录里运行题目的 `verify.mjs`，它调用 `patchparity judge`，
+用与命令行验证同一套规则从台账判定，并与预期比对。判定不采信 Agent 的说法（裁决 009），预期也不写在题面里。
+
+结果：
+
+- `D:\pp\e\smoke\summary.csv`：每题一行，判分、judge 判定、可观测性、场景、首个分歧 tick、Agent 终态、轮次、token、花费、用时，
+  以及调用过的非 patchparity 工具。
+- `D:\pp\e\smoke\<题号>\result.json`：同上，另有 judge 的完整摘要（各步耗时、分歧层、母包基线是否命中缓存）与逐个工具的调用次数。
+  同一目录下还有 Agent 与验证脚本的输出、Pigeon 的会话存档（`.pigeon\state\sessions\`）。
+- 服务端那份台账另存在 `D:\pp\artifacts\sessions\<时间戳>\` 下。
+
+同一个 `-Name` 重跑即续跑：已有 `result.json` 的题跳过，没有的（中途退出的残局）整个重来。
 
 长时间跑批时，离开前**断开**远程桌面（直接关掉窗口），不要**注销**：断开后会话里的进程继续运行，注销会结束它们。
 云主机专门给 patchparity 用，`--yolo` 放行的是这台机器上的全部权限，不要在上面放别的重要东西。
 Pigeon 的 `--sandbox` 用不上：它把工作区放进 Linux 容器，而 Unity 与 MCP 服务端必须在这台 Windows 主机上。
-
-结果看 `D:\pp\e\smoke\results.jsonl`：每题一行，有判分、轮次、token 与花费。judge 输出的 JSON 摘要（判定、可观测性、场景、
-首个分歧 tick 与分歧层、各步耗时、母包基线是否命中缓存）不在这里，而在会话账本 `.pigeon\sessions\<会话号>.jsonl` 的
-`eval.verified` 事件里。服务端那份台账另存在 `D:\pp\artifacts\sessions\<时间戳>\` 下，工作树判完分就会被删。
-
-### 成批跑：run-eval.ps1
-
-`run-eval.ps1` 把上面几步串起来：生成题目与输出目录、跑 `pigeon eval`、最后汇总每题的判分与 judge 判定，
-写到 `D:\pp\e\<名字>-summary.csv`。
-
-```powershell
-$env:DEEPSEEK_API_KEY = '<你的 key>'
-powershell -ExecutionPolicy Bypass -File D:\pp\patchparity\setup\run-eval.ps1 -Name s6 -Only search- -Isolate
-```
-
-- `-Only`：只跑 id 以此开头的题；不给则跑全部。
-- `-Isolate`：每道题单独一个输出目录（`s6-01`、`s6-02`……）。Pigeon 给 Agent 开放了检索会话记录的内置工具，
-  检索范围是输出目录下的全部会话，同一目录里后面的题能翻到前面的题找到的场景（裁决 019）。场景搜索类题目要加。
 
 经 SSH 遥控时，跑批不能挂在 SSH 会话下（断网会卡死输出管道），key 又不能落盘。做法是经 WMI 起一个不依附会话的进程，
 key 只放进它的环境：
@@ -168,10 +151,12 @@ key 只放进它的环境：
 $env:DEEPSEEK_API_KEY = [Console]::In.ReadLine()   # 由 SSH 的标准输入送进来
 $vars = Get-ChildItem Env: | ForEach-Object { "$($_.Name)=$($_.Value)" }
 $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ EnvironmentVariables = [string[]]$vars; ShowWindow = [uint16]0 }
-$cmd = 'cmd.exe /c powershell -NoProfile -ExecutionPolicy Bypass -File D:\pp\patchparity\setup\run-eval.ps1 -Name s6 -Only search- -Isolate > D:\pp\logs\eval-s6.log 2>&1'
+$cmd = 'cmd.exe /c powershell -NoProfile -ExecutionPolicy Bypass -File D:\pp\patchparity\setup\run-eval.ps1 -Name s7 > D:\pp\logs\eval-s7.log 2>&1'
 Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = 'D:\pp'; ProcessStartupInformation = $startup }
 $env:DEEPSEEK_API_KEY = $null
 ```
+
+S5、S6 的结果是用 Pigeon `65ff318` 的 `pigeon eval` 跑的；之后的 Pigeon 移除了它，跑题改由 `patchparity eval`（裁决 020）。
 
 ## 常见问题
 
@@ -180,5 +165,7 @@ $env:DEEPSEEK_API_KEY = $null
 - **报"工作区被另一个会话占用"**：同一时刻只允许一个会话改动被测样例（裁决 014）。等它结束，或结束那个 `patchparity-mcp.exe`。
 - **报"玩法源码有来源不明的改动"**：有人绕过工具直接改了 `Assets/Brawler/`。确认无用后在 `D:\pp\vendor\Klotho` 里
   `git checkout -- Samples/Brawler/Assets/Brawler` 恢复（裁决 015）。
-- **Pigeon 下 MCP 工具一个都没有**：headless 与 eval 不打印 MCP 启动失败，去输出目录 `.pigeon\sessions\` 下的账本里查
-  `run.started` 的 `mcpServers`。Unity 若因缺环境变量失败，在 `.mcp.json` 的 `env` 里补上。
+- **Agent 没有调用任何 patchparity 工具**：看题目工作目录里的 `agent.err.txt` 与 `.pigeon\state\sessions\` 下会话账本里
+  `run.started` 的 MCP 服务状态。Unity 若因缺环境变量失败，在 `mcp-launch.json` 的服务定义里加 `env`。
+- **Pigeon 开跑前报配置错误**：`pigeon run` 发现旧布局的配置文件（如 `.pigeon\mcp.json`）会拒绝启动，提示运行 `pigeon migrate-config`；
+  跑题器写的是新布局，不会触发。

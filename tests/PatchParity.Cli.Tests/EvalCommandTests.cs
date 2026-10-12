@@ -192,18 +192,27 @@ public class EvalCommandTests : IDisposable
         var runner = new FakeRunner(spec =>
         {
             if (!IsAgent(spec)) return new ProcessOutcome(0, false, JudgeJson("equivalent"));
-            // 扮演 Pigeon：会话事件写在治理根（即工作目录）的 .pigeon/state/sessions 下
-            string sessions = Path.Combine(spec.WorkingDirectory, ".pigeon", "state", "sessions");
+            // 扮演 Pigeon 5e70ca2：会话存档在治理根（即工作目录）的 .pigeon/state/sessions/<编码的工作目录>/<时间>_<会话号>.jsonl，
+            // 格式取自本机冒烟测试的实际存档
+            string sessions = Path.Combine(spec.WorkingDirectory, ".pigeon", "state", "sessions", "--D--pp-e-s7-search-a--");
             Directory.CreateDirectory(sessions);
-            File.WriteAllLines(Path.Combine(sessions, "sess_9.jsonl"), new[]
+            File.WriteAllLines(Path.Combine(sessions, "2026-10-12T10-09-04-716Z_sess_9.jsonl"), new[]
             {
-                """{"kind":"run.started","payload":{}}""",
-                """{"kind":"tool.proposed","payload":{"toolCallId":"1","toolName":"mcp__patchparity__run_scenario","args":{}}}""",
-                """{"kind":"tool.proposed","payload":{"toolCallId":"2","toolName":"mcp__patchparity__run_scenario","args":{}}}""",
-                """{"kind":"tool.settled","payload":{"toolCallId":"2","toolName":"mcp__patchparity__run_scenario"}}""",
-                // 别的事件里出现 "tool.proposed" 字样不算一次调用
-                """{"kind":"approval.recorded","payload":{"after":"tool.proposed","toolName":"mcp__patchparity__run_scenario"}}""",
-                """{"kind":"tool.proposed","payload":{"toolCallId":"3","toolName":"read_file","args":{}}}""",
+                """{"kind":"header","version":4,"id":"sess_9"}""",
+                """{"kind":"entry","type":"custom","customType":"pigeon.run-start","data":{"policy":{"allow":["read_file"]}}}""",
+                """{"kind":"entry","type":"message","message":{"role":"assistant","content":[{"type":"text","text":"试第一个场景"},""" +
+                """{"type":"toolCall","id":"1","name":"mcp__patchparity__run_scenario","arguments":{}},""" +
+                """{"type":"toolCall","id":"2","name":"mcp__patchparity__run_scenario","arguments":{}}]}}""",
+                // 工具返回另记一条，带着工具名，不算一次调用
+                """{"kind":"entry","type":"message","message":{"role":"toolResult","toolCallId":"2","toolName":"mcp__patchparity__run_scenario","content":[{"type":"text","text":"ok"}]}}""",
+                // 别的条目里出现 toolCall 字样也不算
+                """{"kind":"entry","type":"custom","customType":"note","data":{"content":[{"type":"toolCall","name":"mcp__patchparity__run_scenario"}]}}""",
+                """{"kind":"entry","type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"3","name":"read_file","arguments":{"path":"x"}}]}}""",
+            });
+            // 另一个会话的存档不算进来
+            File.WriteAllLines(Path.Combine(sessions, "2026-10-12T09-00-00-000Z_sess_other.jsonl"), new[]
+            {
+                """{"kind":"entry","type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"9","name":"grep","arguments":{}}]}}""",
             });
             return new ProcessOutcome(0, false, AgentJson(session: "sess_9"));
         });

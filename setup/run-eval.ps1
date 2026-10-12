@@ -1,31 +1,28 @@
 ﻿<#
 .SYNOPSIS
-跑一批 pigeon eval：生成题目与输出目录，交给 Agent 逐题跑完，再汇总每题的判分与 judge 的判定。
+跑一批题：按本机路径生成题目，交给 patchparity eval 逐题让 Agent 做完并判分。
 
 .DESCRIPTION
 DEEPSEEK_API_KEY 须已在当前进程的环境里；脚本不读写任何存放 key 的文件。
 
--Isolate 让每道题单独用一个输出目录。Pigeon 给 Agent 开放了检索会话记录的内置工具（search_sessions、
-read_session_entry），检索范围是输出目录下的全部会话：同一目录里逐题跑时，后面的题能翻到前面的题的工具返回，
-包括它们找到的场景（S6 实测有 Agent 这样翻过，见裁决 019）。场景搜索类题目应当隔离。
+每道题一个独立的工作目录 <根>\e\<名字>\<题号>，各带一套 Pigeon 的治理根（MCP 启动定义、风险档、会话存档），
+会话检索关掉：题与题之间看不到彼此的会话（裁决 019、020）。同一名字重跑即续跑，已有结果的题跳过。
 
 跑批要几分钟到几小时，不要挂在 SSH 会话下：断网会卡死输出管道。远程桌面里前台运行后断开（不要注销），
 或经 WMI 起一个不依附会话的进程，见 README。
 
-汇总写到 <根>\e\<名字>-summary.csv。judge 的判定不在 results.jsonl 里，而在各题会话账本的 eval.verified 事件中。
+汇总在 <根>\e\<名字>\summary.csv；每题的判分、judge 判定、Agent 用量与工具调用在 <题号>\result.json。
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^[A-Za-z0-9_-]{1,12}$')]
+    [ValidatePattern('^[A-Za-z0-9_-]{1,16}$')]
     [string]$Name,
 
     # 只跑 id 以此开头的题，例如 search- 只跑场景搜索类；不给则跑全部
     [string]$Only = '',
 
-    # 每道题单独一个输出目录（<名字>-01、<名字>-02……），题与题之间看不到彼此的会话
-    [switch]$Isolate,
-
+    # 经 setup/pigeon/deepseek-stream-fn.mjs 调用的模型；S5、S6 的结果都是 deepseek-v4-flash
     [string]$Model = 'deepseek-v4-flash'
 )
 
@@ -33,68 +30,47 @@ param(
 
 if (-not $env:DEEPSEEK_API_KEY) { throw '当前进程的环境里没有 DEEPSEEK_API_KEY' }
 
-# Pigeon 以 UTF-8 输出中文；输出被重定向到日志时，PowerShell 默认按控制台代码页转码，日志里就成了乱码
+# 命令行以 UTF-8 输出中文；输出被重定向到日志时，PowerShell 默认按控制台代码页转码，日志里就成了乱码
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 
-$cli = Join-Path $Paths.Pigeon 'src\cli\index.ts'
+$cliExe = Join-Path $Paths.CliBin 'patchparity.exe'
 $streamFn = Join-Path $Paths.Pigeon 'local\deepseek-stream-fn.mjs'
+foreach ($required in @($Paths.McpExe, $cliExe, $Paths.UnityExe, $Paths.Project, $streamFn)) {
+    if (-not (Test-Path $required)) { throw "找不到 $required，请先运行 install-toolchain.ps1 与 prepare-workspace.ps1" }
+}
+
+$out = Join-Path $Root "e\$Name"
+New-Item -ItemType Directory -Force $out | Out-Null
+
+# MCP 服务端的启动定义，跑题器把它复制成每道题工作目录里的 .mcp.json。
+# 服务端的工作目录就是题目的工作目录，路径一律写绝对路径
+$server = [ordered]@{
+    command = $Paths.McpExe
+    args    = @(
+        '--unity', $Paths.UnityExe,
+        '--project', $Paths.Project,
+        '--artifacts', $Paths.Artifacts,
+        '--repo', $Paths.VendorRepo,
+        '--cache', $Paths.Cache
+    )
+}
+$mcpConfig = Join-Path $out 'mcp-launch.json'
+# 不带 BOM 的 UTF-8：PowerShell 5.1 的 Out-File 会加 BOM，Pigeon 按 JSON 解析时不认
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[IO.File]::WriteAllText($mcpConfig, ([ordered]@{ mcpServers = [ordered]@{ patchparity = $server } } | ConvertTo-Json -Depth 6), $utf8)
+
+# 题目按本机路径现场生成（含改动用例与命令行程序的绝对路径），不入库；内容是确定的，续跑时重新生成不影响已有结果
 $tasks = Join-Path $PatchParityRoot 'eval\tasks'
-$newRun = Join-Path $PSScriptRoot 'new-eval-run.ps1'
+$generate = @((Join-Path $PatchParityRoot 'eval\generate-tasks.mjs'), '--cli', $cliExe, '--out', $tasks)
+if ($Only) { $generate += @('--only', $Only) }
+Invoke-Native 'node' $generate
 
-$ids = @((Get-Content (Join-Path $PatchParityRoot 'cases\cases.json') -Raw -Encoding UTF8 | ConvertFrom-Json).cases |
-    ForEach-Object { $_.id } | Where-Object { $_.StartsWith($Only, [StringComparison]::Ordinal) })
-if ($ids.Count -eq 0) { throw "cases.json 里没有 id 以 '$Only' 开头的题" }
+# 模型由 stream-fn 模块按这个环境变量选；传给 Pigeon 的 --model 只是身份占位
+$env:PATCHPARITY_DEEPSEEK_MODEL = $Model
 
-# 每批：生成题目与输出目录，再交给 pigeon eval。有题判分不过时 pigeon eval 照样以 0 退出，所以这里不按退出码中断
-$batches = if ($Isolate) {
-    $i = 0
-    foreach ($id in $ids) { $i++; [pscustomobject]@{ Run = '{0}-{1:00}' -f $Name, $i; Only = $id } }
-} else {
-    [pscustomobject]@{ Run = $Name; Only = $Only }
-}
-
-$outs = @()
-foreach ($batch in $batches) {
-    # new-eval-run 的提示走 Write-Host（信息流 6），Out-Null 管不到
-    & $newRun -Name $batch.Run -Only $batch.Only 6> $null | Out-Null
-    $out = Join-Path $Root "e\$($batch.Run)"
-    $outs += $out
-    Write-Step "pigeon eval → $out"
-    & node $cli eval $tasks --out $out --runs 1 --conditions none --skill (Join-Path $out 'unused-skills') `
-        --stream-fn $streamFn --provider deepseek --model $Model --yolo
-    Write-Host "  pigeon eval 退出码 $LASTEXITCODE"
-}
-
-$rows = foreach ($out in $outs) {
-    $results = Join-Path $out 'results.jsonl'
-    if (-not (Test-Path $results)) { Write-Warning "$out 没有 results.jsonl"; continue }
-    foreach ($line in Get-Content $results -Encoding UTF8) {
-        $r = $line | ConvertFrom-Json
-        $details = $null
-        $ledger = Join-Path $out ".pigeon\sessions\$($r.sessionId).jsonl"
-        if (Test-Path $ledger) {
-            foreach ($event in Get-Content $ledger -Encoding UTF8) {
-                if ($event -match '"kind":"eval\.verified"') { $details = ($event | ConvertFrom-Json).payload.details }
-            }
-        }
-        [pscustomobject]@{
-            task       = $r.taskId
-            grade      = $r.verdict
-            verdict    = $details.verdict
-            observable = $details.observable
-            tick       = $details.first_divergent_tick
-            scenario   = $details.scenario
-            turns      = $r.turns
-            minutes    = [math]::Round($r.wallMs / 60000, 1)
-            tokens     = $r.usage.totalTokens
-            usd        = [math]::Round($r.usage.cost.total, 4)
-            out        = $out
-        }
-    }
-}
-
-$summary = Join-Path $Root "e\$Name-summary.csv"
-$rows | Export-Csv -Path $summary -NoTypeInformation -Encoding UTF8
-$rows | Format-Table task, grade, verdict, observable, tick, turns, minutes, usd -AutoSize | Out-Host
-$passed = @($rows | Where-Object { $_.grade -eq 'pass' }).Count
-Write-Step "判分通过 $passed / $(@($rows).Count)，汇总 $summary"
+Write-Step "patchparity eval → $out"
+& $cliExe eval --tasks $tasks --out $out --mcp-config $mcpConfig --pigeon $Paths.Pigeon --stream-fn $streamFn `
+    --provider deepseek --model $Model
+# 0 全部判分通过 / 1 有题不通过：都是正常跑完；只有用法错误（2）与异常（9）才算脚本失败
+$code = $LASTEXITCODE
+if ($code -ne 0 -and $code -ne 1) { throw "patchparity eval 失败，退出码 $code" }

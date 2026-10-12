@@ -1,11 +1,11 @@
-// 由 cases/cases.json 生成 pigeon eval 的题目目录：每道题一个 <输出目录>/<id>/，含 task.json、task.md、README.md、verify.mjs。
+// 由 cases/cases.json 生成题目目录：每道题一个 <输出目录>/<id>/，含 task.json、task.md、README.md、verify.mjs。
+// 由 `patchparity eval` 逐题交给 Agent 去做（裁决 020；此前是 Pigeon 65ff318 的 pigeon eval，task.json 沿用它的格式）。
 //
 // 题目目录在每台主机上现场生成、不入库：改动用例与命令行程序的位置因主机而异，生成时写成绝对路径。
 // 题面（task.md）只交代按什么顺序调哪些工具，不含预期结论；预期与改动触及的组件只写进 verify.mjs 的 judge 参数。
-// 工作树取仓库的第一个提交（只有 .gitignore）：Agent 在工作树里看不到任何用例与实测结论，题目也用不到工作树里的文件。
+// Agent 的工作目录是跑题器为每道题新建的空目录，里面没有任何用例与实测结论。
 //
 // 用法：node eval/generate-tasks.mjs --cli <patchparity.exe> --out <题目目录> [--cases <cases 目录>] [--only <id 前缀>]
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,7 +30,7 @@ function parseArgs(argv) {
   return args;
 }
 
-// Pigeon 的任务 id 规则：与目录名一致，最长 24 个字符（src/eval/task.ts:31）
+// id 即题目目录名与工作目录名；沿用 Pigeon 原任务格式的规则（最长 24 个字符），路径短些也好
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,23}$/;
 const CATEGORIES = { safe: "安全", dangerous: "危险", boundary: "边界" };
 const MEASURED = new Set(["equivalent", "divergent", "patch_failed", "rebuild_failed"]);
@@ -41,12 +41,6 @@ const BUDGET = { maxTurns: 80, wallClockMs: 60 * 60 * 1000 };
 // 场景搜索类多出若干轮试场景：每试一次是两次运行加一次比对，约八轮；留足八次尝试的余量
 const SEARCH_BUDGET = { maxTurns: 200, wallClockMs: 90 * 60 * 1000 };
 const MAX_ATTEMPTS = 8;
-
-function rootCommit() {
-  return execFileSync("git", ["-C", repoRoot, "rev-list", "--max-parents=0", "HEAD"], { encoding: "utf8" })
-    .trim()
-    .split("\n")[0];
-}
 
 function taskMarkdown(c, patchPath) {
   return `# 验证一个热更补丁
@@ -152,7 +146,7 @@ function readme(c) {
 
 function verifyScript(cli, judgeArgs) {
   return `// 判分：用 patchparity judge 从本题工作树里的台账判定，并与预期比对。由 eval/generate-tasks.mjs 生成，勿手改。
-// 退出码即判分：0 符合预期，非 0 不符合。judge 的最后一行输出是 JSON 摘要，pigeon eval 会原样收进结果文件。
+// 退出码即判分：0 符合预期，非 0 不符合。judge 的最后一行输出是 JSON 摘要，patchparity eval 会原样收进结果文件。
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
@@ -170,7 +164,6 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!existsSync(args.cli)) throw new Error(`找不到命令行程序 ${args.cli}`);
   const manifest = JSON.parse(readFileSync(path.join(args.cases, "cases.json"), "utf8"));
-  const ref = rootCommit();
 
   // 每次整体重生成：清单里删掉的题不能留在目录里继续被跑
   rmSync(args.out, { recursive: true, force: true });
@@ -178,7 +171,7 @@ function main() {
   // --only <前缀>：只生成 id 以此开头的题，例如只跑场景搜索类时给 search-
   const cases = args.only ? manifest.cases.filter((c) => c.id.startsWith(args.only)) : manifest.cases;
   for (const c of cases) {
-    if (!ID_PATTERN.test(c.id)) throw new Error(`题目 id 不合 Pigeon 的规则（小写字母数字与连字符，最长 24）：${c.id}`);
+    if (!ID_PATTERN.test(c.id)) throw new Error(`题目 id 只能是小写字母数字与连字符，最长 24：${c.id}`);
     if (seen.has(c.id)) throw new Error(`题目 id 重复：${c.id}`);
     seen.add(c.id);
     if (!CATEGORIES[c.category]) throw new Error(`未知类别 ${c.category}（${c.id}）`);
@@ -200,12 +193,9 @@ function main() {
       version: 1,
       id: c.id,
       instructions: "task.md",
-      repo: { path: ".", ref },
       budget: c.search ? SEARCH_BUDGET : BUDGET,
       verifier: { command: ["node", "{TASK_DIR}/verify.mjs"], timeoutMs: 120000 },
-      assets: [],
       tags: c.search ? ["patch-verify", "scenario-search", c.category] : ["patch-verify", c.category],
-      holdout: false,
     };
     writeFileSync(path.join(dir, "task.json"), JSON.stringify(task, null, 2) + "\n");
     writeFileSync(path.join(dir, "task.md"),
@@ -213,7 +203,7 @@ function main() {
     writeFileSync(path.join(dir, "README.md"), readme(c));
     writeFileSync(path.join(dir, "verify.mjs"), verifyScript(args.cli, judgeArgs));
   }
-  console.log(`已生成 ${cases.length} 道题到 ${args.out}（工作树取提交 ${ref.slice(0, 7)}）`);
+  console.log(`已生成 ${cases.length} 道题到 ${args.out}`);
 }
 
 main();

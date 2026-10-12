@@ -58,8 +58,8 @@ public sealed class ServerSession : IDisposable
             new BaselineCache(config.Cache),
             () => CacheKeyBuilder.ForProject(config.Unity, config.Project),
             lease,
-            // 工作目录那份给验证脚本读：pigeon eval 下它是该题的工作树，判分在服务端关闭之后、删工作树之前。
-            // 会话产物目录那份留档：工作树判完分就删
+            // 工作目录那份给验证脚本读：patchparity eval 下它是该题的工作目录，判分在服务端关闭之后。
+            // 会话产物目录那份留档：工作目录可能被清掉重来
             new CaseLedger(
                 Path.Combine(Environment.CurrentDirectory, CaseLedger.FileName),
                 Path.Combine(sessionRoot, CaseLedger.FileName)));

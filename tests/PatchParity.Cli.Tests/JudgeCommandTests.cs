@@ -6,7 +6,7 @@ using Xunit;
 namespace PatchParity.Cli.Tests;
 
 /// <summary>
-/// judge 子命令：pigeon eval 的验证脚本靠它的退出码判分，靠它最后一行 JSON 收集结果。
+/// judge 子命令：题目的验证脚本靠它的退出码判分，靠它最后一行 JSON 收集结果。
 /// 命令行此前没有测试，曾在接口改动后编译不过而无人察觉。
 /// </summary>
 [Collection("控制台输出")]

@@ -5,11 +5,11 @@ using PatchParity.Pipeline;
 namespace PatchParity.Cli;
 
 /// <summary>
-/// 从 MCP 会话的台账判定一个改动，并与预期比对。供 pigeon eval 的验证脚本调用。
+/// 从 MCP 会话的台账判定一个改动，并与预期比对。供题目的验证脚本（verify.mjs）调用。
 ///
 /// 判定用与命令行验证同一套规则（<see cref="CaseVerdict"/>），不采信 Agent 自己的说法（裁决 009）。
 /// 预期结论与改动触及的组件只经命令行参数给出，不写进题面，Agent 无从迎合。
-/// 标准输出最后一行是一个 JSON 对象，pigeon eval 会把它原样收进结果文件。
+/// 标准输出最后一行是一个 JSON 对象，patchparity eval 会把它原样收进结果文件。
 /// </summary>
 public static class JudgeCommand
 {

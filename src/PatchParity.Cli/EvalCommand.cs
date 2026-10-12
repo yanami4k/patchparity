@@ -184,7 +184,10 @@ public static class EvalCommand
         };
     }
 
-    /// <summary>会话事件里每次工具调用记一条 tool.proposed；按工具名计数。</summary>
+    /// <summary>
+    /// 按工具名数 Agent 发起的工具调用。Pigeon 5e70ca2 的会话存档在 .pigeon/state/sessions/&lt;按工作目录编码的子目录&gt;/
+    /// &lt;时间&gt;_&lt;会话号&gt;.jsonl，每行一个条目；调用记在消息条目的 toolCall 块里（连同入参），工具返回另记一条，不重复计。
+    /// </summary>
     private static Dictionary<string, int> CountTools(string workspace, string? sessionId)
     {
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -193,21 +196,24 @@ public static class EvalCommand
         {
             return counts;
         }
-        IEnumerable<string> files = sessionId is not null
-            ? new[] { Path.Combine(sessions, sessionId + ".jsonl") }.Where(File.Exists)
-            : Directory.EnumerateFiles(sessions, "*.jsonl");
+        IEnumerable<string> files = Directory.EnumerateFiles(sessions, "*.jsonl", SearchOption.AllDirectories)
+            .Where(f => sessionId is null || Path.GetFileNameWithoutExtension(f).EndsWith("_" + sessionId, StringComparison.Ordinal));
         foreach (string file in files)
         {
             foreach (string line in File.ReadLines(file))
             {
-                if (!line.Contains("\"tool.proposed\"", StringComparison.Ordinal))
+                if (!line.Contains("\"toolCall\"", StringComparison.Ordinal) ||
+                    JsonNode.Parse(line) is not JsonObject e ||
+                    e["message"]?["content"] is not JsonArray content)
                 {
                     continue;
                 }
-                if (JsonNode.Parse(line) is JsonObject e && (string?)e["kind"] == "tool.proposed" &&
-                    (string?)e["payload"]?["toolName"] is { } name)
+                foreach (JsonNode? block in content)
                 {
-                    counts[name] = counts.GetValueOrDefault(name) + 1;
+                    if ((string?)block?["type"] == "toolCall" && (string?)block["name"] is { } name)
+                    {
+                        counts[name] = counts.GetValueOrDefault(name) + 1;
+                    }
                 }
             }
         }
