@@ -116,6 +116,52 @@ public class JudgeCommandTests : IDisposable
         Assert.Contains("c:ItemComponent:hash", summary["divergent_layers"]!.AsArray().Select(n => n!.GetValue<string>()));
     }
 
+    /// <summary>在等价台账的基础上补一次未打补丁的母包运行；csv 与整包重编相同即不可观测。</summary>
+    private void AddBaselineRun(string csv)
+    {
+        string path = Path.Combine(_root, "baseline-run.csv");
+        File.WriteAllText(path, csv);
+        var entries = CaseLedger.Load(Ledger).ToList();
+        var ledger = new CaseLedger(Ledger);
+        foreach (LedgerEntry e in entries)
+        {
+            ledger.Record(e);
+        }
+        ledger.Record(new LedgerEntry
+        {
+            Step = LedgerSteps.Run, Ok = true, RunKind = LedgerSteps.Baseline, RunName = "b", Package = "base",
+            Scenario = "default", Csv = path,
+        });
+    }
+
+    [Fact]
+    public void 要求可观测而不可观测时判作废且不符合预期()
+    {
+        WriteEquivalentLedger();
+        AddBaselineRun(Csv);
+
+        (int code, JsonObject summary) = Judge(Ledger, "--expect", "safe", "--touched", "ItemComponent", "--require-observable");
+
+        Assert.Equal(1, code);
+        Assert.Equal("void", summary["verdict"]!.GetValue<string>());
+        Assert.False(summary["observable"]!.GetValue<bool>());
+        Assert.True(summary["require_observable"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void 要求可观测且可观测时照常判定并报出场景()
+    {
+        WriteEquivalentLedger();
+        AddBaselineRun(Csv.Replace("1,2,1,20", "1,5,1,77"));
+
+        (int code, JsonObject summary) = Judge(Ledger, "--expect", "safe", "--touched", "ItemComponent", "--require-observable");
+
+        Assert.Equal(0, code);
+        Assert.Equal("equivalent", summary["verdict"]!.GetValue<string>());
+        Assert.True(summary["observable"]!.GetValue<bool>());
+        Assert.Equal("default", summary["scenario"]!.GetValue<string>());
+    }
+
     [Fact]
     public void 不符合预期时退出码为1()
     {

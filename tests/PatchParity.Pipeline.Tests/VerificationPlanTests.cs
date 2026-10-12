@@ -85,7 +85,7 @@ public class VerificationPlanTests : IDisposable
         VerificationReport report = Plan(launcher).Verify(Case());
 
         Assert.Equal(
-            new[] { "baseline-build", "patch-compile", "patch-run", "patch-run-repeat", "rebuild", "rebuild-run" },
+            new[] { "baseline-build", "baseline-run", "patch-compile", "patch-run", "patch-run-repeat", "rebuild", "rebuild-run" },
             report.Steps.Select(s => s.Step).ToArray());
     }
 
@@ -100,7 +100,41 @@ public class VerificationPlanTests : IDisposable
         VerificationReport report = Plan(launcher).Verify(Case());
 
         Assert.Equal(Verdict.PatchFailed, report.Verdict);
-        Assert.Equal(new[] { "baseline-build", "patch-compile" }, report.Steps.Select(s => s.Step).ToArray());
+        Assert.Equal(new[] { "baseline-build", "baseline-run", "patch-compile" }, report.Steps.Select(s => s.Step).ToArray());
+    }
+
+    [Fact]
+    public void 整包重编与母包自身不同即报改动可观测()
+    {
+        var launcher = new FakeLauncher(_root)
+            .BuildSucceeds()
+            .CompileSucceeds()
+            // 母包自身与改动后的三次运行不同：改动在此场景下改变了状态
+            .RunSequence(LiveWorldOther, LiveWorld, LiveWorld, LiveWorld);
+
+        VerificationReport report = Plan(launcher).Verify(Case());
+
+        Assert.Equal(Verdict.Equivalent, report.Verdict);
+        Assert.True(report.Observable);
+    }
+
+    [Fact]
+    public void 要求可观测而改动不可观测时判作废()
+    {
+        // 母包自身与整包重编逐帧相同：改动没被执行到，一致不能当证据
+        var launcher = new FakeLauncher(_root)
+            .BuildSucceeds()
+            .CompileSucceeds()
+            .RunSucceeds(LiveWorld);
+        var paths = new ToolPaths { UnityExecutable = "unity", ProjectPath = Path.Combine(_root, "project"), ArtifactRoot = _root };
+        Directory.CreateDirectory(_root);
+        var plan = new VerificationPlan(paths, new UnityInvoker(paths, launcher), _patch) { RequireObservable = true };
+
+        VerificationReport report = plan.Verify(Case());
+
+        Assert.Equal(Verdict.Void, report.Verdict);
+        Assert.False(report.Observable);
+        Assert.Contains("不可观测", report.Reason);
     }
 
     [Fact]
@@ -164,9 +198,10 @@ public class VerificationPlanTests : IDisposable
 
         Plan(launcher).Verify(Case());
 
-        // 前两次运行是母包加补丁，最后一次是整包重编，用包自身的热更程序集
-        Assert.Contains("patch-sample", launcher.RunDllDirs[0]);
+        // 第一次是母包自身，接着两次是母包加补丁，最后一次是整包重编，后者与前者都用包自身的热更程序集
+        Assert.DoesNotContain("patch-sample", launcher.RunDllDirs[0]);
         Assert.Contains("patch-sample", launcher.RunDllDirs[1]);
+        Assert.Contains("patch-sample", launcher.RunDllDirs[2]);
         Assert.DoesNotContain("patch-sample", launcher.RunDllDirs[^1]);
     }
 
@@ -193,7 +228,7 @@ public class VerificationPlanTests : IDisposable
         var launcher = new FakeLauncher(_root)
             .BuildSucceeds()
             .CompileSucceeds()
-            .RunSequence(LiveWorld, LiveWorldOther);
+            .RunSequence(LiveWorld, LiveWorld, LiveWorldOther);
 
         VerificationReport report = Plan(launcher).Verify(Case());
 
@@ -238,8 +273,8 @@ public class VerificationPlanTests : IDisposable
         var launcher = new FakeLauncher(_root)
             .BuildSucceeds()
             .CompileSucceeds()
-            // 补丁两次运行一致，整包重编的结果与之不同
-            .RunSequence(LiveWorld, LiveWorld, LiveWorldOther);
+            // 母包自身、补丁两次运行一致，整包重编的结果与之不同
+            .RunSequence(LiveWorld, LiveWorld, LiveWorld, LiveWorldOther);
 
         VerificationReport report = Plan(launcher).Verify(Case());
 

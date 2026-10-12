@@ -46,6 +46,7 @@ public static class VerifyCommand
             // 与 MCP 共用同一套缓存键：用 --cache 指向同一目录时，两边可互相复用母包基线
             Cache = options.NoCache ? null : new BaselineCache(options.Cache),
             BaselineKey = options.NoCache ? null : () => CacheKeyBuilder.ForProject(options.Unity, options.Project),
+            RequireObservable = options.RequireObservable,
         };
 
         var change = new ChangeCase
@@ -54,7 +55,9 @@ public static class VerifyCommand
             PatchPath = options.CasePath,
             Expected = options.Expected,
             TouchedComponents = options.Touched,
-            Scenario = new Scenario { Seed = options.Seed, Ticks = options.Ticks, Players = options.Players, Bots = options.Bots },
+            Scenario = options.ScenarioOptions is { } custom
+                ? Scenario.Parse(custom)
+                : new Scenario { Seed = options.Seed, Ticks = options.Ticks, Players = options.Players, Bots = options.Bots },
         };
 
         Console.WriteLine($"用例 {change.Name}｜场景 {change.Scenario.Name}｜预期 {Describe(change.Expected)}");
@@ -103,6 +106,12 @@ public static class VerifyCommand
         {
             Console.WriteLine($"覆盖自检: {(coverage.Passed ? "通过" : "不通过")} " +
                               $"末帧组件实例数={coverage.LiveComponents}");
+        }
+        if (report.Observable is { } observable)
+        {
+            Console.WriteLine(observable
+                ? "可观测性: 改动在此场景下可观测（整包重编与母包自身逐帧不同）"
+                : "可观测性: 改动在此场景下不可观测（整包重编与母包自身逐帧相同），一致不足以说明补丁等价");
         }
 
         Console.WriteLine();
@@ -166,6 +175,7 @@ public static class VerifyCommand
                              [--touched 组件A,组件B] [--expect safe|dangerous|boundary]
                              [--seed 42] [--ticks 600] [--players 2] [--bots 0]
                              [--cache <缓存目录，缺省为产物目录下的 baseline-cache>] [--no-cache]
+                             [--scenario-options "k=v;k=v"（自定义场景，给了即忽略 --seed 等）] [--require-observable]
 
         退出码: 0 一致 / 3 不一致 / 4 作废 / 5 补丁失败 / 8 整包重编失败 / 6 工作区被占用 / 7 工作区有无法恢复的残留 / 2 用法错误
         """);
@@ -186,6 +196,8 @@ public static class VerifyCommand
         public int Bots;
         public string Cache = "";
         public bool NoCache;
+        public bool RequireObservable;
+        public string? ScenarioOptions;
 
         public static Options? Parse(IReadOnlyList<string> args)
         {
@@ -196,6 +208,11 @@ public static class VerifyCommand
                 if (flag == "--no-cache")
                 {
                     o.NoCache = true;
+                    continue;
+                }
+                if (flag == "--require-observable")
+                {
+                    o.RequireObservable = true;
                     continue;
                 }
                 if (i + 1 >= args.Count)
@@ -210,6 +227,7 @@ public static class VerifyCommand
                     case "--artifacts": o.Artifacts = value; break;
                     case "--repo": o.Repository = value; break;
                     case "--cache": o.Cache = value; break;
+                    case "--scenario-options": o.ScenarioOptions = value; break;
                     case "--case": o.CasePath = value; break;
                     case "--name": o.Name = value; break;
                     case "--touched": o.Touched = value.Split(',', StringSplitOptions.RemoveEmptyEntries); break;

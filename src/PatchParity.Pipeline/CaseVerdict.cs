@@ -21,6 +21,11 @@ public sealed record CaseEvidence
     public StepResult? Rebuild { get; init; }
     public RunResult? RebuildRun { get; init; }
 
+    /// <summary>
+    /// 未打补丁的母包在同一场景下的运行。与整包重编的运行比，有差异即改动在此场景下可观测（裁决 019）。
+    /// </summary>
+    public RunResult? BaselineRun { get; init; }
+
     public IReadOnlyCollection<string> TouchedComponents { get; init; } = Array.Empty<string>();
 }
 
@@ -34,6 +39,12 @@ public sealed record CaseDecision
     public CoverageCheck? Coverage { get; init; }
     public ComparisonResult? Comparison { get; init; }
 
+    /// <summary>
+    /// 改动在所选场景下是否可观测：整包重编与未打补丁的母包逐帧有无差异。没有母包运行可比时为空。
+    /// 不可观测时"一致"不能当作补丁等价的证据——改动点可能根本没被执行到。
+    /// </summary>
+    public bool? Observable { get; init; }
+
     public bool Final => Verdict != Verdict.Incomplete;
 }
 
@@ -45,7 +56,11 @@ public sealed record CaseDecision
 /// </summary>
 public static class CaseVerdict
 {
-    public static CaseDecision Decide(CaseEvidence e)
+    /// <param name="requireObservable">
+    /// 要求改动在所选场景下可观测，否则判作废。场景生成类题目用它作为客观的停止条件（裁决 009、019）；
+    /// 其余题目只把可观测性作为覆盖强度报告——行为不变的改动（如换一种写法取同样的结果）本就不可观测。
+    /// </param>
+    public static CaseDecision Decide(CaseEvidence e, bool requireObservable = false)
     {
         // 一、母包基线
         if (e.BaselineBuild is { Succeeded: false } baseline)
@@ -129,13 +144,44 @@ public static class CaseVerdict
             return RebuildFailed(e.RebuildRun.Failure, "整包重编的产物未能跑完场景");
         }
 
-        ComparisonResult comparison = SeriesComparer.Compare(HashSeries.Load(e.RebuildRun.CsvPath!), patchSeries);
+        HashSeries rebuildSeries = HashSeries.Load(e.RebuildRun.CsvPath!);
+
+        // 六、可观测性：同一场景下整包重编与未打补丁的母包有无差异
+        bool? observable = e.BaselineRun is { Succeeded: true } baselineRun
+            ? !SeriesComparer.Compare(HashSeries.Load(baselineRun.CsvPath!), rebuildSeries).Identical
+            : null;
+        if (requireObservable)
+        {
+            if (e.BaselineRun is null)
+            {
+                return Incomplete("还没有在同一场景下运行未打补丁的母包，无从判断改动是否可观测", determinism, coverage);
+            }
+            if (!e.BaselineRun.Succeeded)
+            {
+                return new CaseDecision
+                {
+                    Verdict = Verdict.Void, Failure = e.BaselineRun.Failure, Determinism = determinism, Coverage = coverage,
+                    Reason = "未打补丁的母包在所选场景下未能跑完，无从判断改动是否可观测",
+                };
+            }
+            if (observable == false)
+            {
+                return new CaseDecision
+                {
+                    Verdict = Verdict.Void, Observable = false, Determinism = determinism, Coverage = coverage,
+                    Reason = "改动在所选场景下不可观测：整包重编与未打补丁的母包逐帧相同，改动点很可能没被执行到，此时的一致不能当作证据",
+                };
+            }
+        }
+
+        ComparisonResult comparison = SeriesComparer.Compare(rebuildSeries, patchSeries);
         return new CaseDecision
         {
             Verdict = comparison.Identical ? Verdict.Equivalent : Verdict.Divergent,
             Determinism = determinism,
             Coverage = coverage,
             Comparison = comparison,
+            Observable = observable,
         };
     }
 

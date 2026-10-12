@@ -150,13 +150,15 @@ public sealed class Tools
             Description =
                 "在指定的包上跑一个场景，产出逐 tick 分层哈希，并给出覆盖信号。" +
                 "给出 patch_name 时从该补丁加载热更程序集，即\"母包加补丁\"；不给则运行包自身。" +
+                "场景用 scenario 选预置的，或用 options 自定义（参数见 list_scenarios），二者择一。" +
                 "后台运行：立即返回任务号，用 wait_job 取结果。",
             ReadOnly = false,
             InputSchema = Schema(new JsonObject
             {
                 ["package"] = Property("string", "包标识，取自 build_package 的返回"),
                 ["patch_name"] = Property("string", "可选，补丁名，取自 build_patch"),
-                ["scenario"] = Property("string", "场景名，取自 list_scenarios，缺省 default"),
+                ["scenario"] = Property("string", "预置场景名，取自 list_scenarios，缺省 default"),
+                ["options"] = Property("string", "自定义场景，k=v;k=v，可用参数与取值范围见 list_scenarios；与 scenario 择一"),
                 ["run_name"] = Property("string", "本次运行的名字，compare_runs 以此引用"),
             }, "package", "run_name"),
         },
@@ -253,11 +255,20 @@ public sealed class Tools
             text.Append("  ").Append(key).Append("  ").Append(scenario.ToOptionString()).Append('\n');
         }
 
+        var parameters = new JsonObject();
+        text.Append("\n自定义场景（run_scenario 的 options，k=v;k=v，未给的参数取缺省）：\n");
+        foreach ((string key, string description) in Scenario.CustomParameters)
+        {
+            parameters[key] = description;
+            text.Append("  ").Append(key).Append("：").Append(description).Append('\n');
+        }
+        text.Append("例：ground=1;moveSpeed=5;spawn=-1:0,1:0;attack=500;chase=1\n");
+
         return new ToolResult
         {
             Ok = true,
             Text = text.ToString(),
-            Structured = new JsonObject { ["scenarios"] = list },
+            Structured = new JsonObject { ["scenarios"] = list, ["custom_parameters"] = parameters },
         };
     }
 
@@ -438,8 +449,27 @@ public sealed class Tools
             return ToolResult.Failure("运行名只能含字母、数字、连字符与下划线: " + runName);
         }
 
-        string scenarioName = TryGetString(arguments, "scenario", out string s) ? s : "default";
-        if (!Scenarios.TryGetValue(scenarioName, out Scenario? scenario))
+        bool hasPreset = TryGetString(arguments, "scenario", out string s);
+        bool hasOptions = TryGetString(arguments, "options", out string options);
+        if (hasPreset && hasOptions)
+        {
+            return ToolResult.Failure("scenario 与 options 只能给一个");
+        }
+        string scenarioName = hasPreset ? s : "default";
+        Scenario? scenario;
+        if (hasOptions)
+        {
+            try
+            {
+                scenario = Scenario.Parse(options);
+            }
+            catch (FormatException e)
+            {
+                return ToolResult.Failure("自定义场景不合法：" + e.Message);
+            }
+            scenarioName = "custom";
+        }
+        else if (!Scenarios.TryGetValue(scenarioName, out scenario))
         {
             return ToolResult.Failure($"未知场景 {scenarioName}，可用场景见 list_scenarios");
         }
@@ -499,7 +529,8 @@ public sealed class Tools
             Package = package,
             PatchName = hotUpdateDir is null ? null : patchName,
             RunName = runName,
-            Scenario = scenarioName,
+            // 记规范化的选项串而不是场景名：预置场景与参数相同的自定义场景应视为同一场景
+            Scenario = scenario.ToOptionString(),
             RunKind = runKind,
         });
 
@@ -532,6 +563,7 @@ public sealed class Tools
                 ["package"] = package,
                 ["patch_name"] = hotUpdateDir is null ? null : patchName,
                 ["scenario"] = scenarioName,
+                ["scenario_options"] = scenario.ToOptionString(),
                 ["ticks"] = series.Count,
                 ["live_components"] = live,
                 ["seconds"] = Math.Round(run.Elapsed.TotalSeconds, 1),

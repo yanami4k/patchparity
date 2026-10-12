@@ -20,7 +20,7 @@ public sealed record LedgerEntry
     public string? PatchName { get; init; }
     public string? RunName { get; init; }
 
-    /// <summary>运行用的场景名，取自预置场景。</summary>
+    /// <summary>运行用的场景：规范化的选项串（预置场景与自定义场景同一写法，参数相同即相同）。</summary>
     public string? Scenario { get; init; }
 
     /// <summary>运行的类别：patched 母包加补丁，rebuild 整包重编的包，baseline 母包自身。</summary>
@@ -106,20 +106,28 @@ public sealed class CaseLedger
     }
 
     /// <summary>
-    /// 从台账还原证据。按验证的含义挑出各步：最后一次母包基线构建、最后一次补丁编译、
-    /// 在母包基线上装该补丁的前两次运行、最后一次整包重编、在该包上的第一次运行。
-    /// 挑出的各步彼此对不上（运行用的不是这个母包、不是这个补丁、场景不同）时返回不一致的原因，不勉强判定。
+    /// 从台账还原证据。先定场景：取最后一次补丁运行的场景（还没有补丁运行时取最后一次运行的场景）——
+    /// 场景生成类题目会先在多个场景下试运行母包与整包重编，最后才在选定的场景下跑补丁（裁决 019）。
+    /// 再在该场景下挑出各步：最后一次母包基线构建、最后一次补丁编译、在母包基线上装该补丁的前两次运行、
+    /// 最后一次整包重编及其在该场景下的首次运行、未打补丁的母包在该场景下的首次运行。
+    /// 挑出的各步彼此对不上（运行用的不是这个母包、不是这个补丁）时返回不一致的原因，不勉强判定。
     /// </summary>
     public static (CaseEvidence Evidence, string? Inconsistency) ToEvidence(
         IReadOnlyList<LedgerEntry> entries, IReadOnlyCollection<string> touchedComponents)
     {
         LedgerEntry? baseline = entries.LastOrDefault(e => e.Step == LedgerSteps.BaselineBuild);
         LedgerEntry? compile = entries.LastOrDefault(e => e.Step == LedgerSteps.PatchCompile);
-        LedgerEntry[] patched = entries.Where(e => e.Step == LedgerSteps.Run && e.RunKind == LedgerSteps.Patched).Take(2).ToArray();
+        LedgerEntry[] runs = entries.Where(e => e.Step == LedgerSteps.Run).ToArray();
+        string? scenario = (runs.LastOrDefault(e => e.RunKind == LedgerSteps.Patched) ?? runs.LastOrDefault())?.Scenario;
+        LedgerEntry[] inScenario = runs.Where(e => e.Scenario == scenario).ToArray();
+
+        LedgerEntry[] patched = inScenario.Where(e => e.RunKind == LedgerSteps.Patched).Take(2).ToArray();
         LedgerEntry? rebuild = entries.LastOrDefault(e => e.Step == LedgerSteps.RebuildBuild);
         LedgerEntry? rebuildRun = rebuild?.Package is { } rebuildPackage
-            ? entries.FirstOrDefault(e => e.Step == LedgerSteps.Run && e.RunKind == LedgerSteps.Rebuild && e.Package == rebuildPackage)
+            ? inScenario.FirstOrDefault(e => e.RunKind == LedgerSteps.Rebuild && e.Package == rebuildPackage)
             : null;
+        LedgerEntry? baselineRun = inScenario.FirstOrDefault(e =>
+            e.RunKind == LedgerSteps.Baseline && (baseline?.Package is not { } baselinePackage || e.Package == baselinePackage));
 
         string? inconsistency = null;
         foreach (LedgerEntry run in patched)
@@ -133,11 +141,6 @@ public sealed class CaseLedger
                 inconsistency = $"补丁运行 {run.RunName} 装的补丁 {run.PatchName} 不是编译的 {patchName}";
             }
         }
-        string[] scenarios = patched.Append(rebuildRun).OfType<LedgerEntry>().Select(e => e.Scenario ?? "").Distinct().ToArray();
-        if (scenarios.Length > 1)
-        {
-            inconsistency = "各次运行的场景不同：" + string.Join("、", scenarios);
-        }
 
         var evidence = new CaseEvidence
         {
@@ -148,9 +151,17 @@ public sealed class CaseLedger
             PatchRunAgain = patched.Length > 1 ? Run(patched[1]) : null,
             Rebuild = rebuild is null ? null : Step(rebuild),
             RebuildRun = rebuildRun is null ? null : Run(rebuildRun),
+            BaselineRun = baselineRun is null ? null : Run(baselineRun),
             TouchedComponents = touchedComponents,
         };
         return (evidence, inconsistency);
+    }
+
+    /// <summary>证据所在的场景：与 <see cref="ToEvidence"/> 选定的一致，供报告。</summary>
+    public static string? ChosenScenario(IReadOnlyList<LedgerEntry> entries)
+    {
+        LedgerEntry[] runs = entries.Where(e => e.Step == LedgerSteps.Run).ToArray();
+        return (runs.LastOrDefault(e => e.RunKind == LedgerSteps.Patched) ?? runs.LastOrDefault())?.Scenario;
     }
 
     private static StepResult Step(LedgerEntry e) => new()

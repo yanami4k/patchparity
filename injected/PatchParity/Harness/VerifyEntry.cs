@@ -15,6 +15,7 @@ using System.Text;
 using Brawler;
 using xpTURN.Klotho.Core;
 using xpTURN.Klotho.Deterministic.Math;
+using xpTURN.Klotho.Deterministic.Physics;
 using xpTURN.Klotho.Deterministic.Random;
 using xpTURN.Klotho.ECS;
 using xpTURN.Klotho.Logging;
@@ -37,7 +38,7 @@ namespace PatchParity.Harness
             // 注册玩法系统与数据资产，然后锁定资产注册表。
             // 这一步由会话层（KlothoSession）负责，而验证直接使用引擎，故须自行照做；
             // 漏掉它会在世界初始化读取配置时抛 KeyNotFoundException: DataAsset not found。
-            var callbacks = new HarnessCallbacks(logger, opt.Players, opt.Bots);
+            var callbacks = new HarnessCallbacks(logger, opt);
             callbacks.RegisterSystems(simulation);
             simulation.LockAssetRegistry();
 
@@ -89,7 +90,7 @@ namespace PatchParity.Harness
             for (int tick = 0; tick < opt.Ticks; tick++)
             {
                 commands.Clear();
-                BuildCommands(commands, opt, tick);
+                BuildCommands(commands, opt, tick, simulation.Frame);
                 simulation.Tick(commands);
                 lastHash = simulation.GetStateHash(breakdown);
 
@@ -123,25 +124,34 @@ namespace PatchParity.Harness
         // 输入序列完全由种子与 tick 派生，不读外部设备，保证同一 options 每次产生同一串命令。
         // 开局先把角色生成出来，之后每帧发移动与偶发攻击，让战斗、拾取、边界等系统真的被执行到；
         // 覆盖不到的代码改了也不会反映在哈希里，那种"一致"是假阳性。
-        private static void BuildCommands(List<ICommand> commands, Options opt, int tick)
+        //
+        // 场景参数只在给定时改变输入：未给定的参数沿用原先的抽取方式与顺序，
+        // 缺省场景因而与加入这些参数之前逐字节相同，已有用例的实测结论不受影响。
+        private static void BuildCommands(List<ICommand> commands, Options opt, int tick, Frame frame)
         {
             if (tick == 0)
             {
                 for (int pid = 0; pid < opt.Players; pid++)
                 {
                     var rng = DeterministicRandom.FromSeed((ulong)opt.Seed, InputFeatureKey, (ulong)pid);
+                    int characterClass = rng.NextIntInclusive(0, 1);
+                    var spawn = new FPVector2(
+                        rng.NextFixed(FP64.FromInt(-8), FP64.FromInt(8)),
+                        rng.NextFixed(FP64.FromInt(-8), FP64.FromInt(8)));
+                    if (opt.Classes != null) characterClass = opt.Classes[pid];
+                    if (opt.Spawn != null) spawn = opt.Spawn[pid];
                     commands.Add(new SpawnCharacterCommand
                     {
                         PlayerId = pid,
                         Tick = tick,
-                        CharacterClass = rng.NextIntInclusive(0, 1),
-                        SpawnPosition = new FPVector2(
-                            rng.NextFixed(FP64.FromInt(-8), FP64.FromInt(8)),
-                            rng.NextFixed(FP64.FromInt(-8), FP64.FromInt(8))),
+                        CharacterClass = characterClass,
+                        SpawnPosition = spawn,
                     });
                 }
                 return;
             }
+
+            Dictionary<int, FPVector3> positions = opt.Chase ? AlivePositions(frame) : null;
 
             for (int pid = 0; pid < opt.Players; pid++)
             {
@@ -149,11 +159,39 @@ namespace PatchParity.Harness
                 var rng = DeterministicRandom.FromSeed((ulong)opt.Seed, InputFeatureKey, (ulong)(tick * 64 + pid));
 
                 byte buttons = PlayerInputCommand.HAS_MOVE_BIT;
-                if (rng.NextIntInclusive(0, 9) == 0) buttons |= PlayerInputCommand.ATTACK_BIT;
-                if (rng.NextIntInclusive(0, 19) == 0) buttons |= PlayerInputCommand.JUMP_PRESSED_BIT;
+                bool attack = opt.AttackPermille < 0 ? rng.NextIntInclusive(0, 9) == 0 : rng.NextIntInclusive(0, 999) < opt.AttackPermille;
+                bool jump = opt.JumpPermille < 0 ? rng.NextIntInclusive(0, 19) == 0 : rng.NextIntInclusive(0, 999) < opt.JumpPermille;
+                if (attack) buttons |= PlayerInputCommand.ATTACK_BIT;
+                if (jump) buttons |= PlayerInputCommand.JUMP_PRESSED_BIT;
 
                 FP64 h = rng.NextFixed(FP64.FromInt(-1), FP64.FromInt(1));
                 FP64 v = rng.NextFixed(FP64.FromInt(-1), FP64.FromInt(1));
+
+                // 技能放在移动轴之后抽取：不给 skill 时不消耗随机数，缺省场景不变
+                if (opt.SkillPermille > 0 && rng.NextIntInclusive(0, 999) < opt.SkillPermille)
+                {
+                    buttons |= PlayerInputCommand.HAS_SKILL_BIT;
+                    if (rng.NextBool()) buttons |= PlayerInputCommand.SKILL_SLOT_BIT;
+                }
+
+                // 追逐：朝最近的另一名存活角色移动，让近战、击退真的发生
+                if (positions != null && positions.TryGetValue(pid, out FPVector3 self))
+                {
+                    FPVector3 target = default;
+                    FP64 best = FP64.MaxValue;
+                    foreach (var other in positions)
+                    {
+                        if (other.Key == pid) continue;
+                        FP64 dx = other.Value.x - self.x, dz = other.Value.z - self.z;
+                        FP64 d = dx * dx + dz * dz;
+                        if (d < best) { best = d; target = other.Value; }
+                    }
+                    if (best != FP64.MaxValue)
+                    {
+                        h = Toward(target.x - self.x);
+                        v = Toward(target.z - self.z);
+                    }
+                }
 
                 commands.Add(new PlayerInputCommand
                 {
@@ -178,6 +216,17 @@ namespace PatchParity.Harness
             // 否则世界初始化会抛 [HFSMManager] Unknown rootId。留作后续场景变体。
             public int Bots = 0;
 
+            // 以下为场景生成用的参数（裁决 019）。取值的范围由流水线一侧校验，这里只按给定的值执行；
+            // 未给定时保持原先的行为。
+            public bool Ground;              // 放一块覆盖整个场地的地面：角色能站住、跳跃
+            public string MoveSpeed;         // 各职业的移动速度（十进制字符串），缺省沿用数据资产里的 0
+            public int[] Classes;            // 每名玩家的职业 0..3，缺省按种子取 0 或 1
+            public FPVector2[] Spawn;        // 每名玩家的出生位置 (x, z)，缺省按种子取
+            public int AttackPermille = -1;  // 每帧攻击的千分概率，-1 为原先的 1/10
+            public int JumpPermille = -1;    // 每帧跳跃的千分概率，-1 为原先的 1/20
+            public int SkillPermille;        // 每帧放技能的千分概率，缺省不放
+            public bool Chase;               // 朝最近的另一名角色移动
+
             public static Options Parse(string text)
             {
                 var o = new Options();
@@ -189,6 +238,12 @@ namespace PatchParity.Harness
                     if (eq <= 0) continue;
                     string key = pair.Substring(0, eq).Trim();
                     string raw = pair.Substring(eq + 1).Trim();
+                    switch (key)
+                    {
+                        case "moveSpeed": o.MoveSpeed = raw; continue;
+                        case "classes": o.Classes = ParseInts(raw); continue;
+                        case "spawn": o.Spawn = ParsePoints(raw); continue;
+                    }
                     if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)) continue;
                     switch (key)
                     {
@@ -198,34 +253,114 @@ namespace PatchParity.Harness
                         case "deltaTimeMs": o.DeltaTimeMs = value; break;
                         case "players": o.Players = value; break;
                         case "bots": o.Bots = value; break;
+                        case "ground": o.Ground = value != 0; break;
+                        case "attack": o.AttackPermille = value; break;
+                        case "jump": o.JumpPermille = value; break;
+                        case "skill": o.SkillPermille = value; break;
+                        case "chase": o.Chase = value != 0; break;
                     }
                 }
                 return o;
             }
+
+            private static int[] ParseInts(string raw)
+            {
+                string[] parts = raw.Split(',');
+                var values = new int[parts.Length];
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    values[i] = int.Parse(parts[i].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture);
+                }
+                return values;
+            }
+
+            // "x:z,x:z"，以整数或一位小数给出
+            private static FPVector2[] ParsePoints(string raw)
+            {
+                string[] parts = raw.Split(',');
+                var points = new FPVector2[parts.Length];
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    string[] xz = parts[i].Split(':');
+                    points[i] = new FPVector2(ParseFixed(xz[0]), ParseFixed(xz[1]));
+                }
+                return points;
+            }
+
+            public static FP64 ParseFixed(string raw) =>
+                FP64.FromDouble(double.Parse(raw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture));
+        }
+
+        // 存活角色的位置，按玩家号
+        private static Dictionary<int, FPVector3> AlivePositions(Frame frame)
+        {
+            var positions = new Dictionary<int, FPVector3>();
+            var filter = frame.Filter<CharacterComponent, TransformComponent>();
+            while (filter.Next(out var entity))
+            {
+                ref readonly var character = ref frame.GetReadOnly<CharacterComponent>(entity);
+                if (character.IsDead) continue;
+                positions[character.PlayerId] = frame.GetReadOnly<TransformComponent>(entity).Position;
+            }
+            return positions;
+        }
+
+        // 追逐时的移动轴：相距超过半个单位就全速靠近，否则停下
+        private static FP64 Toward(FP64 delta)
+        {
+            FP64 deadzone = FP64.FromDouble(0.5);
+            if (delta > deadzone) return FP64.One;
+            if (delta < -deadzone) return -FP64.One;
+            return FP64.Zero;
         }
 
         // 只做验证所需的最小回调：注册玩法系统与初始化世界，不涉及网络、回放与存档
         private sealed class HarnessCallbacks : ISimulationCallbacks
         {
             private readonly IKLogger _logger;
-            private readonly int _players;
-            private readonly int _bots;
+            private readonly Options _opt;
 
-            public HarnessCallbacks(IKLogger logger, int players, int bots)
+            public HarnessCallbacks(IKLogger logger, Options opt)
             {
                 _logger = logger;
-                _players = players;
-                _bots = bots;
+                _opt = opt;
             }
 
             public void RegisterSystems(EcsSimulation simulation)
             {
-                BrawlerSimSetup.RegisterSystems(simulation, _logger, BrawlerSimSetup.CreateDefaultDataAssets());
+                List<IDataAsset> assets = BrawlerSimSetup.CreateDefaultDataAssets();
+                if (_opt.MoveSpeed != null)
+                {
+                    FP64 speed = Options.ParseFixed(_opt.MoveSpeed);
+                    foreach (IDataAsset asset in assets)
+                    {
+                        if (asset is CharacterStatsAsset stats) stats.MoveSpeed = speed;
+                    }
+                }
+
+                // 地面：顶面在 y=0、覆盖整个 40×40 场地的静态盒。缺省没有地面，角色一直下落（GroundClampSystem 的射线落空）
+                List<FPStaticCollider> colliders = null;
+                if (_opt.Ground)
+                {
+                    colliders = new List<FPStaticCollider>
+                    {
+                        new FPStaticCollider
+                        {
+                            id = 1,
+                            collider = FPCollider.FromBox(new FPBoxShape(
+                                new FPVector3(FP64.FromInt(20), FP64.FromDouble(0.5), FP64.FromInt(20)),
+                                new FPVector3(FP64.Zero, FP64.FromDouble(-0.5), FP64.Zero))),
+                            friction = FP64.FromDouble(0.5),
+                        },
+                    };
+                }
+
+                BrawlerSimSetup.RegisterSystems(simulation, _logger, assets, colliders);
             }
 
             public void OnInitializeWorld(IKlothoEngine engine)
             {
-                BrawlerSimSetup.InitializeWorldState(engine, _players, _bots);
+                BrawlerSimSetup.InitializeWorldState(engine, _opt.Players, _opt.Bots);
             }
 
             // 命令由 harness 按种子自行构造，不走引擎的输入轮询

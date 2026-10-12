@@ -20,7 +20,7 @@ public static class JudgeCommand
         if (options is null)
         {
             Console.Error.WriteLine("""
-                用法: patchparity judge <台账> --expect safe|dangerous|boundary
+                用法: patchparity judge <台账> --expect safe|dangerous|boundary [--require-observable]
                                          [--measured equivalent|divergent|patch_failed] [--touched 组件A,组件B] [--case 用例名]
                 """);
             return 2;
@@ -46,7 +46,7 @@ public static class JudgeCommand
         IReadOnlyList<LedgerEntry> entries = CaseLedger.Load(options.Ledger);
         (CaseEvidence evidence, string? inconsistency) = CaseLedger.ToEvidence(entries, options.Touched);
         CaseDecision decision = inconsistency is null
-            ? CaseVerdict.Decide(evidence)
+            ? CaseVerdict.Decide(evidence, options.RequireObservable)
             : new CaseDecision { Verdict = Verdict.Incomplete, Reason = "证据不一致：" + inconsistency };
         bool matches = CaseVerdict.Matches(decision.Verdict, options.Expected, options.Measured);
 
@@ -62,6 +62,9 @@ public static class JudgeCommand
         summary["verdict"] = Name(decision.Verdict);
         summary["matches"] = matches;
         summary["reason"] = decision.Reason;
+        summary["observable"] = decision.Observable;
+        summary["require_observable"] = options.RequireObservable;
+        summary["scenario"] = CaseLedger.ChosenScenario(entries);
         summary["first_divergent_tick"] = decision.Comparison?.FirstDivergentTick;
         var layers = new JsonArray();
         foreach (LayerDifference layer in decision.Comparison?.DivergentLayers ?? Array.Empty<LayerDifference>())
@@ -110,6 +113,9 @@ public static class JudgeCommand
         public string[] Touched = Array.Empty<string>();
         public string Case = "";
 
+        /// <summary>要求改动在所选场景下可观测，场景生成类题目用（裁决 019）。</summary>
+        public bool RequireObservable;
+
         public static Options? Parse(IReadOnlyList<string> args)
         {
             if (args.Count < 2)
@@ -117,8 +123,19 @@ public static class JudgeCommand
                 return null;
             }
             var o = new Options { Ledger = args[1] };
-            for (int i = 2; i < args.Count - 1; i += 2)
+            for (int i = 2; i < args.Count; i += 2)
             {
+                // 不带值的开关
+                if (args[i] == "--require-observable")
+                {
+                    o.RequireObservable = true;
+                    i--;
+                    continue;
+                }
+                if (i + 1 >= args.Count)
+                {
+                    return null;
+                }
                 string value = args[i + 1];
                 switch (args[i])
                 {
@@ -152,8 +169,8 @@ public static class JudgeCommand
                         return null;
                 }
             }
-            // 参数个数须成对，且必须给出预期：不给预期就无所谓判对判错
-            return args.Count % 2 == 0 && o.HasExpected ? o : null;
+            // 必须给出预期：不给预期就无所谓判对判错
+            return o.HasExpected ? o : null;
         }
     }
 }

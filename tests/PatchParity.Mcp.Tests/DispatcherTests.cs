@@ -506,6 +506,97 @@ public class DispatcherTests : IDisposable
         Assert.True(Tools.MaxWaitSeconds <= 45);
     }
 
+    // ── 自定义场景与场景搜索（裁决 019）────────────────────
+
+    [Fact]
+    public void 自定义场景经规范化后传给验证包并记进台账()
+    {
+        string baseline = Structured(RunJob("build_package", new JsonObject()), "package");
+
+        JsonNode run = RunJob("run_scenario", new JsonObject
+        {
+            ["package"] = baseline, ["run_name"] = "b", ["options"] = "chase=1;ground=1;moveSpeed=5",
+        });
+
+        Assert.False(IsError(run));
+        string canonical = "seed=42;ticks=600;players=2;bots=0;maxEntities=512;deltaTimeMs=25;ground=1;moveSpeed=5;chase=1";
+        Assert.Equal(canonical, _unity.RunScenarios.Last());
+        Assert.Equal(canonical, CaseLedger.Load(LedgerPath).Last().Scenario);
+    }
+
+    [Fact]
+    public void 预置场景与参数相同的自定义场景在台账里是同一场景()
+    {
+        string baseline = Structured(RunJob("build_package", new JsonObject()), "package");
+        RunJob("run_scenario", new JsonObject { ["package"] = baseline, ["run_name"] = "a", ["scenario"] = "seed-7" });
+        RunJob("run_scenario", new JsonObject { ["package"] = baseline, ["run_name"] = "b", ["options"] = "seed=7" });
+
+        IReadOnlyList<LedgerEntry> entries = CaseLedger.Load(LedgerPath);
+        Assert.Equal(entries[^2].Scenario, entries[^1].Scenario);
+    }
+
+    [Theory]
+    [InlineData("speed=5")]
+    [InlineData("moveSpeed=99")]
+    [InlineData("classes=0")]
+    public void 不合法的自定义场景在启动前被拒绝(string options)
+    {
+        string baseline = Structured(RunJob("build_package", new JsonObject()), "package");
+
+        JsonNode run = Call("run_scenario", new JsonObject { ["package"] = baseline, ["run_name"] = "x", ["options"] = options });
+
+        Assert.True(IsError(run));
+        Assert.Contains("自定义场景不合法", run["content"]![0]!["text"]!.GetValue<string>());
+        Assert.Empty(_unity.RunScenarios);
+    }
+
+    [Fact]
+    public void 预置场景与自定义场景不能同时给()
+    {
+        string baseline = Structured(RunJob("build_package", new JsonObject()), "package");
+
+        Assert.True(IsError(Call("run_scenario", new JsonObject
+        {
+            ["package"] = baseline, ["run_name"] = "x", ["scenario"] = "default", ["options"] = "ground=1",
+        })));
+    }
+
+    [Fact]
+    public void 列场景时给出自定义参数的说明()
+    {
+        JsonNode result = Call("list_scenarios", new JsonObject());
+
+        JsonObject parameters = result["structuredContent"]!["custom_parameters"]!.AsObject();
+        Assert.True(parameters.ContainsKey("ground"));
+        Assert.True(parameters.ContainsKey("chase"));
+    }
+
+    [Fact]
+    public void 场景搜索后在选定场景下验证且台账能证明改动可观测()
+    {
+        // 先在缺省场景下试母包与整包重编，再换一个场景，最后在该场景下跑补丁：judge 应以最后的场景判定
+        string baseline = Structured(RunJob("build_package", new JsonObject()), "package");
+        RunJob("build_patch", new JsonObject { ["patch_path"] = "cases/x.patch", ["patch_name"] = "x" });
+        string rebuild = Structured(RunJob("build_package", new JsonObject()), "package");
+        const string chosen = "ground=1;moveSpeed=5";
+        RunJob("run_scenario", new JsonObject { ["package"] = baseline, ["run_name"] = "b-default" });
+        RunJob("run_scenario", new JsonObject { ["package"] = rebuild, ["run_name"] = "r-default" });
+        RunJob("run_scenario", new JsonObject { ["package"] = baseline, ["run_name"] = "b-ground", ["options"] = chosen });
+        RunJob("run_scenario", new JsonObject { ["package"] = rebuild, ["run_name"] = "r-ground", ["options"] = chosen });
+        RunJob("run_scenario", new JsonObject { ["package"] = baseline, ["patch_name"] = "x", ["run_name"] = "p1", ["options"] = chosen });
+        RunJob("run_scenario", new JsonObject { ["package"] = baseline, ["patch_name"] = "x", ["run_name"] = "p2", ["options"] = chosen });
+        Call("revert_patch", new JsonObject { ["patch_path"] = "cases/x.patch" });
+
+        IReadOnlyList<LedgerEntry> entries = CaseLedger.Load(LedgerPath);
+        (CaseEvidence evidence, string? inconsistency) = CaseLedger.ToEvidence(entries, new[] { "Item" });
+        CaseDecision decision = CaseVerdict.Decide(evidence, requireObservable: true);
+
+        Assert.Null(inconsistency);
+        Assert.Contains("ground=1", CaseLedger.ChosenScenario(entries));
+        Assert.Equal(Verdict.Equivalent, decision.Verdict);
+        Assert.True(decision.Observable);
+    }
+
     // ── 入参校验 ───────────────────────────────────────────
 
     [Fact]
@@ -663,6 +754,7 @@ public class DispatcherTests : IDisposable
         public bool ThrowOnLaunch { get; set; }
         public List<string> CompileTargets { get; } = new();
         public List<string> RunDllDirs { get; } = new();
+        public List<string> RunScenarios { get; } = new();
 
         public void LaunchDetached(string executable, IReadOnlyList<string> arguments)
         {
@@ -674,6 +766,7 @@ public class DispatcherTests : IDisposable
             {
                 string dlls = ValueOf(arguments, "-patchparityDlls")!;
                 RunDllDirs.Add(dlls);
+                RunScenarios.Add(ValueOf(arguments, "-patchparityScenario")!);
                 bool patched = dlls.Contains(Path.Combine("patches", ""), StringComparison.Ordinal) ||
                                executable.Contains(PatchedKey, StringComparison.Ordinal);
 

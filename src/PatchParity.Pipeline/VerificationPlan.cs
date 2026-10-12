@@ -41,6 +41,9 @@ public sealed record VerificationReport
 
     /// <summary>作废或失败的原因，直接面向读报告的人。</summary>
     public string? Reason { get; init; }
+
+    /// <summary>改动在场景下是否可观测；母包在该场景下没跑成时为空。</summary>
+    public bool? Observable { get; init; }
 }
 
 /// <summary>
@@ -76,6 +79,9 @@ public sealed class VerificationPlan
     /// <summary>计算母包基线缓存键所需的输入。缺省时不启用缓存。</summary>
     public Func<CacheKey>? BaselineKey { get; init; }
 
+    /// <summary>要求改动在场景下可观测，否则判作废（见 <see cref="CaseVerdict.Decide"/>）。</summary>
+    public bool RequireObservable { get; init; }
+
     public VerificationReport Verify(ChangeCase change)
     {
         var steps = new List<StepResult>();
@@ -88,7 +94,7 @@ public sealed class VerificationPlan
         VerificationReport? Settled(CaseEvidence e)
         {
             evidence = e;
-            CaseDecision decision = CaseVerdict.Decide(e);
+            CaseDecision decision = CaseVerdict.Decide(e, RequireObservable);
             return decision.Final ? Report(change, steps, baselineLookup, decision) : null;
         }
 
@@ -131,6 +137,13 @@ public sealed class VerificationPlan
             {
                 evidence = evidence with { BaselineReady = true };
             }
+
+            // 母包自身在该场景下跑一次（几秒）：与整包重编比，判断改动在此场景下是否可观测（裁决 019）。
+            // 放在施加改动之前，此时源码与母包一致；失败不影响后续步骤，只是没有可观测性可报
+            RunResult baselineRun = _unity.RunScenario(
+                baselineDir, Path.Combine(_paths.ArtifactRoot, "run-baseline"), change.Scenario, RunTimeout, "baseline-run");
+            steps.Add(baselineRun);
+            evidence = evidence with { BaselineRun = baselineRun };
 
             // 二、补丁路径：施加改动，只重编热更程序集并换进母包基线
             _patch.Apply(change);
@@ -196,5 +209,6 @@ public sealed class VerificationPlan
             Coverage = decision.Coverage,
             Failure = decision.Failure,
             Reason = decision.Reason,
+            Observable = decision.Observable,
         };
 }

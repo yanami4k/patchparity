@@ -193,14 +193,105 @@ public class CaseLedgerTests : IDisposable
     }
 
     [Fact]
-    public void 各次运行场景不同时报证据不一致()
+    public void 整包重编不在补丁运行的场景下跑过即证据不全()
     {
+        // 证据以最后一次补丁运行的场景为准；整包重编只在别的场景下跑过，在这个场景下就还缺它
         var entries = FullRun();
         entries[5] = Run("r", LedgerSteps.Rebuild, "rebuilt", Patched, scenario: "seed-7");
 
-        (_, string? inconsistency) = CaseLedger.ToEvidence(entries, Touched);
+        Assert.Equal(Verdict.Incomplete, Judge(entries).Verdict);
+    }
 
-        Assert.Contains("场景不同", inconsistency);
+    // ── 可观测性与场景搜索（裁决 019）──────────────────────
+
+    [Fact]
+    public void 母包自身与整包重编不同即可观测()
+    {
+        var entries = FullRun();
+        entries.Add(Run("b", LedgerSteps.Baseline, "base", Other));
+
+        CaseDecision decision = Judge(entries);
+
+        Assert.Equal(Verdict.Equivalent, decision.Verdict);
+        Assert.True(decision.Observable);
+    }
+
+    [Fact]
+    public void 母包自身与整包重编相同即不可观测但不要求时照常判定()
+    {
+        var entries = FullRun();
+        entries.Add(Run("b", LedgerSteps.Baseline, "base", Patched));
+
+        CaseDecision decision = Judge(entries);
+
+        Assert.Equal(Verdict.Equivalent, decision.Verdict);
+        Assert.False(decision.Observable);
+    }
+
+    [Fact]
+    public void 要求可观测而不可观测时判作废()
+    {
+        var entries = FullRun();
+        entries.Add(Run("b", LedgerSteps.Baseline, "base", Patched));
+
+        (CaseEvidence evidence, _) = CaseLedger.ToEvidence(entries, Touched);
+        CaseDecision decision = CaseVerdict.Decide(evidence, requireObservable: true);
+
+        Assert.Equal(Verdict.Void, decision.Verdict);
+        Assert.Contains("不可观测", decision.Reason);
+    }
+
+    [Fact]
+    public void 要求可观测而缺母包自身的运行时证据不全()
+    {
+        (CaseEvidence evidence, _) = CaseLedger.ToEvidence(FullRun(), Touched);
+
+        Assert.Equal(Verdict.Incomplete, CaseVerdict.Decide(evidence, requireObservable: true).Verdict);
+    }
+
+    [Fact]
+    public void 没有母包自身的运行时可观测性为空()
+    {
+        Assert.Null(Judge(FullRun()).Observable);
+    }
+
+    [Fact]
+    public void 补丁运行之后在别的场景下的试跑不改变选定的场景()
+    {
+        // 证据以补丁运行的场景为准，而不是以最后一次运行为准：Agent 跑完补丁后又试了一次别的场景
+        var entries = FullRun();
+        entries.Add(Run("b", LedgerSteps.Baseline, "base", Other));
+        entries.Add(Run("late", LedgerSteps.Baseline, "base", Patched, scenario: "seed-7"));
+
+        Assert.Equal("default", CaseLedger.ChosenScenario(entries));
+        Assert.Equal(Verdict.Equivalent, Judge(entries).Verdict);
+        Assert.True(Judge(entries).Observable);
+    }
+
+    [Fact]
+    public void 场景搜索后以补丁运行的场景挑选各次运行()
+    {
+        // Agent 先在缺省场景下试：改动不可观测；换到有地面的场景：可观测；随后在该场景下跑补丁
+        var entries = new List<LedgerEntry>
+        {
+            new() { Step = LedgerSteps.BaselineBuild, Ok = true, Package = "base" },
+            new() { Step = LedgerSteps.RebuildBuild, Ok = true, Package = "rebuilt" },
+            Run("b-default", LedgerSteps.Baseline, "base", Patched, scenario: "default"),
+            Run("r-default", LedgerSteps.Rebuild, "rebuilt", Patched, scenario: "default"),
+            Run("b-ground", LedgerSteps.Baseline, "base", Other, scenario: "ground"),
+            Run("r-ground", LedgerSteps.Rebuild, "rebuilt", Patched, scenario: "ground"),
+            new() { Step = LedgerSteps.PatchCompile, Ok = true, PatchName = "x" },
+            Run("p1", LedgerSteps.Patched, "base", Patched, scenario: "ground"),
+            Run("p2", LedgerSteps.Patched, "base", Patched, scenario: "ground"),
+        };
+
+        (CaseEvidence evidence, string? inconsistency) = CaseLedger.ToEvidence(entries, Touched);
+        CaseDecision decision = CaseVerdict.Decide(evidence, requireObservable: true);
+
+        Assert.Null(inconsistency);
+        Assert.Equal("ground", CaseLedger.ChosenScenario(entries));
+        Assert.Equal(Verdict.Equivalent, decision.Verdict);
+        Assert.True(decision.Observable);
     }
 
     [Fact]
