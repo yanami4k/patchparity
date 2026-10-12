@@ -686,6 +686,55 @@ public class DispatcherTests : IDisposable
     }
 
     [Fact]
+    public void 判为不等价不算工具出错()
+    {
+        // 场景搜索时母包与整包重编不同正是要找的结果；记成出错会误导 Agent，也让 eval 的出错统计失真（S6 实测）
+        WriteRun("left", BaselineCsv);
+        WriteRun("right", PatchedCsv);
+
+        JsonNode result = Call("compare_runs", new JsonObject { ["left"] = "left", ["right"] = "right" });
+
+        Assert.Equal("divergent", Structured(result, "verdict"));
+        Assert.False(IsError(result));
+    }
+
+    [Fact]
+    public void 改动触及的组件名不认识时拒绝并列出可用的组件()
+    {
+        // S6 实测：Agent 填了系统名，覆盖自检静默不过、连得三次作废
+        WriteRun("a", BaselineCsv);
+        WriteRun("b", BaselineCsv);
+
+        JsonNode result = Call("compare_runs", new JsonObject
+        {
+            ["left"] = "a", ["right"] = "b", ["touched_components"] = "PlatformerCommandSystem",
+        });
+
+        Assert.True(IsError(result));
+        string text = result["content"]![0]!["text"]!.GetValue<string>();
+        Assert.Contains("PlatformerCommandSystem", text);
+        Assert.Contains("可用的组件：Item", text);
+    }
+
+    [Fact]
+    public void 覆盖自检不过时说明原因()
+    {
+        // 组件认识，但整个运行里一个实例都没有：照常比对，判为作废并说明是哪个组件没出现
+        const string header = "tick,total,c:Item:count,c:Item:hash,c:Shield:count,c:Shield:hash";
+        WriteRun("a", header + "\n0,1,1,10,0,0\n");
+        WriteRun("b", header + "\n0,1,1,10,0,0\n");
+
+        JsonNode result = Call("compare_runs", new JsonObject
+        {
+            ["left"] = "a", ["right"] = "b", ["touched_components"] = "Item, Shield",
+        });
+
+        Assert.False(IsError(result));
+        Assert.Equal("void", Structured(result, "verdict"));
+        Assert.Contains("从未出现: Shield", result["content"]![0]!["text"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void 比对结果放进evidence键()
     {
         WriteRun("a", BaselineCsv);

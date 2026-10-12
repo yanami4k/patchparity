@@ -180,13 +180,15 @@ public sealed class Tools
             Name = "compare_runs",
             Description =
                 "比对两次运行的逐 tick 分层哈希，给出判定、首个分歧 tick 与分歧层，并附覆盖自检。" +
-                "比对同一包同一补丁的两次运行即为确定性自检。",
+                "比对同一包同一补丁的两次运行即为确定性自检。判定 divergent 只说明两次运行不同，不是工具出错：" +
+                "比对母包基线与整包重编时，divergent 正说明改动在该场景下可观测。",
             ReadOnly = true,
             InputSchema = Schema(new JsonObject
             {
                 ["left"] = Property("string", "左侧运行的名字，通常是整包重编"),
                 ["right"] = Property("string", "右侧运行的名字，通常是母包加补丁"),
-                ["touched_components"] = Property("string", "改动触及的组件，逗号分隔，用于覆盖自检"),
+                ["touched_components"] = Property("string",
+                    "改动触及的 ECS 组件类型名（如 TransformComponent），逗号分隔，用于覆盖自检；系统名、类名不算。可不填，不填时覆盖自检只查世界非空"),
             }, "left", "right"),
         },
     };
@@ -687,11 +689,23 @@ public sealed class Tools
         }
 
         string[] touched = TryGetString(arguments, "touched_components", out string t)
-            ? t.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            ? t.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             : Array.Empty<string>();
 
         HashSeries leftSeries = HashSeries.Load(leftCsv);
         HashSeries rightSeries = HashSeries.Load(rightCsv);
+
+        // 不认识的名字直接拒绝：否则覆盖自检静默不过、判定降为作废，调用方看不出是名字写错了
+        // （S6 实测：Agent 填了系统名 PlatformerCommandSystem，连得三次作废，只好去翻别的会话找原因）
+        string[] known = rightSeries.ComponentNames().Union(leftSeries.ComponentNames()).ToArray();
+        string[] unknown = touched.Where(c => !known.Contains(c, StringComparer.Ordinal)).ToArray();
+        if (unknown.Length > 0)
+        {
+            return ToolResult.Failure(
+                $"touched_components 里的 {string.Join("、", unknown)} 不是本次运行里的组件类型名（系统名、类名不算）。" +
+                $"可用的组件：{string.Join("、", known)}。不确定时可不填");
+        }
+
         CoverageCheck coverage = Preconditions.CheckCoverage(rightSeries, touched);
         ComparisonResult comparison = SeriesComparer.Compare(leftSeries, rightSeries);
 
@@ -705,7 +719,12 @@ public sealed class Tools
         evidence.Append("左 ").Append(left).Append(' ').Append(comparison.LeftCount).Append(" 帧\n");
         evidence.Append("右 ").Append(right).Append(' ').Append(comparison.RightCount).Append(" 帧\n");
         evidence.Append("覆盖自检 ").Append(coverage.Passed ? "通过" : "不通过")
-                .Append(" 末帧组件实例数=").Append(coverage.LiveComponents).Append('\n');
+                .Append(" 末帧组件实例数=").Append(coverage.LiveComponents);
+        if (coverage.Reason is { } reason)
+        {
+            evidence.Append('（').Append(reason).Append('）');
+        }
+        evidence.Append('\n');
         if (comparison.FirstDivergentTick is int tick)
         {
             evidence.Append("首个分歧 tick=").Append(tick.ToString(CultureInfo.InvariantCulture)).Append('\n');
@@ -723,9 +742,11 @@ public sealed class Tools
             layers.Add(new JsonObject { ["layer"] = layer.Layer, ["left"] = layer.Left, ["right"] = layer.Right });
         }
 
+        // 比对做完了就不是出错，不论判定如何：divergent 记成工具出错，场景搜索时"找到了可观测的场景"
+        // 在 Agent 眼里成了"工具返回错误"，eval 的出错统计也被它占满（S6 实测）
         return new ToolResult
         {
-            Ok = verdict != "divergent",
+            Ok = true,
             Text = evidence.ToString(),
             Structured = new JsonObject
             {
