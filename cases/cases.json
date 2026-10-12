@@ -90,7 +90,8 @@
         "PlatformComponent"
       ],
       "scenario": "default",
-      "note": "调换平台组件里两个字段的顺序：组件布局与哈希的字段顺序都变了，组件按字节视图存放在 AOT 侧。替换原 Pack=1 的题（被 Klotho 的分析器 KLOTHO_STRUCT_LAYOUT_MISSING 拒绝，编译不过，测的不是热更）。待实测"
+      "note": "调换平台组件里两个字段的顺序：组件布局与哈希的字段顺序都变了，组件按字节视图存放在 AOT 侧。替换原 Pack=1 的题（被 Klotho 的分析器 KLOTHO_STRUCT_LAYOUT_MISSING 拒绝，编译不过，测的不是热更）。2026-10-12 云上实测等价",
+      "measured": "equivalent"
     },
     {
       "id": "boundary-filter5",
