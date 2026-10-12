@@ -262,7 +262,9 @@ public sealed class Tools
             parameters[key] = description;
             text.Append("  ").Append(key).Append("：").Append(description).Append('\n');
         }
-        text.Append("例：ground=1;moveSpeed=5;spawn=-1:0,1:0;attack=500;chase=1\n");
+        // 示例只演示写法，刻意不涉及地面、移动、攻击：场景搜索类题目评的正是 Agent 能否自己想出让改动可观测的场景，
+        // 示例若恰好是某道题的解，Agent 照抄即"找到"（S6 首轮实测如此，见裁决 019）
+        text.Append("写法示例：seed=7;ticks=300;players=3\n");
 
         return new ToolResult
         {

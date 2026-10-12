@@ -572,6 +572,18 @@ public class DispatcherTests : IDisposable
     }
 
     [Fact]
+    public void 参数说明里的示例不替Agent解题()
+    {
+        // S6 首轮：示例恰好是一道题的探测场景，Agent 第一步读了说明就照抄，场景搜索没被真正考到（裁决 019）
+        string text = Call("list_scenarios", new JsonObject())["content"]![0]!["text"]!.GetValue<string>();
+
+        foreach (string giveaway in new[] { "ground=1", "moveSpeed=", "chase=1", "attack=", "jump=", "spawn=" })
+        {
+            Assert.DoesNotContain(giveaway, text);
+        }
+    }
+
+    [Fact]
     public void 场景搜索后在选定场景下验证且台账能证明改动可观测()
     {
         // 先在缺省场景下试母包与整包重编，再换一个场景，最后在该场景下跑补丁：judge 应以最后的场景判定
