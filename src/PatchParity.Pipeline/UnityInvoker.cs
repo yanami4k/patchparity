@@ -160,21 +160,28 @@ public sealed class UnityInvoker
     {
         string resultPath = Path.Combine(runDir, "result.txt");
         string csvPath = Path.Combine(runDir, "hashes.csv");
+        // 验证包的日志留在运行目录里，不进调用方的标准输出：否则命令行的结论淹没在几百行引擎启动日志里。
+        // -logFile 接住初始化之后的日志，之前的内存配置等几十行只走标准输出，另接一份
+        string playerLog = Path.Combine(runDir, "player.log");
+        string playerOutput = Path.Combine(runDir, "player-stdout.log");
 
         Directory.CreateDirectory(runDir);
         DeleteIfExists(resultPath);
         DeleteIfExists(csvPath);
+        DeleteIfExists(playerLog);
+        DeleteIfExists(playerOutput);
 
         var started = DateTime.UtcNow;
         _launcher.LaunchDetached(Path.Combine(packageDir, "Verify.exe"), new[]
         {
             "-batchmode", "-nographics",
+            "-logFile", playerLog,
             "-patchparityResult", resultPath,
             "-patchparityCsv", csvPath,
             "-patchparityDlls", hotUpdateDir ?? Path.Combine(packageDir, "HotUpdateDlls"),
             "-patchparityAotDlls", Path.Combine(packageDir, "AotDlls"),
             "-patchparityScenario", scenario.ToOptionString(),
-        });
+        }, playerOutput);
 
         bool appeared = _launcher.WaitForArtifact(resultPath, timeout);
         var elapsed = DateTime.UtcNow - started;

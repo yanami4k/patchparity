@@ -11,6 +11,7 @@
 | `install-toolchain.ps1` | Git、Node、VS 生成工具（MSVC）、.NET SDK、Unity Hub、Unity 编辑器与 IL2CPP 模块 | 是（全部已装时否） |
 | `prepare-workspace.ps1` | 被测样例、注入代码、测试与发布、Pigeon、HybridCLR 安装 | 否 |
 | `new-eval-run.ps1` | 为一次 `pigeon eval` 跑批建输出目录并写入 MCP 配置 | 否 |
+| `run-eval.ps1` | 跑一批 `pigeon eval` 并汇总每题的判分与 judge 判定 | 否 |
 | `common.ps1` | 锁定的版本、下载地址、目录布局，由以上脚本引入 | — |
 
 各项版本都锁定在 `common.ps1` 里：Klotho `e29c489`（裁决 002）、Pigeon `65ff318`（裁决 011）、
@@ -142,8 +143,35 @@ node D:\pp\pigeon\src\cli\index.ts eval D:\pp\patchparity\eval\tasks\safe-item-l
 云主机专门给 patchparity 用，`--yolo` 放行的是这台机器上的全部权限，不要在上面放别的重要东西。
 Pigeon 的 `--sandbox` 用不上：它把工作区放进 Linux 容器，而 Unity 与 MCP 服务端必须在这台 Windows 主机上。
 
-结果看 `D:\pp\e\smoke\results.jsonl`：每题一行，其中收着 judge 输出的 JSON 摘要（判定、首个分歧 tick 与分歧层、各步耗时、
-母包基线是否命中缓存）。服务端那份台账另存在 `D:\pp\artifacts\sessions\<会话号>\` 下，工作树判完分就会被删。
+结果看 `D:\pp\e\smoke\results.jsonl`：每题一行，有判分、轮次、token 与花费。judge 输出的 JSON 摘要（判定、可观测性、场景、
+首个分歧 tick 与分歧层、各步耗时、母包基线是否命中缓存）不在这里，而在会话账本 `.pigeon\sessions\<会话号>.jsonl` 的
+`eval.verified` 事件里。服务端那份台账另存在 `D:\pp\artifacts\sessions\<时间戳>\` 下，工作树判完分就会被删。
+
+### 成批跑：run-eval.ps1
+
+`run-eval.ps1` 把上面几步串起来：生成题目与输出目录、跑 `pigeon eval`、最后汇总每题的判分与 judge 判定，
+写到 `D:\pp\e\<名字>-summary.csv`。
+
+```powershell
+$env:DEEPSEEK_API_KEY = '<你的 key>'
+powershell -ExecutionPolicy Bypass -File D:\pp\patchparity\setup\run-eval.ps1 -Name s6 -Only search- -Isolate
+```
+
+- `-Only`：只跑 id 以此开头的题；不给则跑全部。
+- `-Isolate`：每道题单独一个输出目录（`s6-01`、`s6-02`……）。Pigeon 给 Agent 开放了检索会话记录的内置工具，
+  检索范围是输出目录下的全部会话，同一目录里后面的题能翻到前面的题找到的场景（裁决 019）。场景搜索类题目要加。
+
+经 SSH 遥控时，跑批不能挂在 SSH 会话下（断网会卡死输出管道），key 又不能落盘。做法是经 WMI 起一个不依附会话的进程，
+key 只放进它的环境：
+
+```powershell
+$env:DEEPSEEK_API_KEY = [Console]::In.ReadLine()   # 由 SSH 的标准输入送进来
+$vars = Get-ChildItem Env: | ForEach-Object { "$($_.Name)=$($_.Value)" }
+$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ EnvironmentVariables = [string[]]$vars; ShowWindow = [uint16]0 }
+$cmd = 'cmd.exe /c powershell -NoProfile -ExecutionPolicy Bypass -File D:\pp\patchparity\setup\run-eval.ps1 -Name s6 -Only search- -Isolate > D:\pp\logs\eval-s6.log 2>&1'
+Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = 'D:\pp'; ProcessStartupInformation = $startup }
+$env:DEEPSEEK_API_KEY = $null
+```
 
 ## 常见问题
 

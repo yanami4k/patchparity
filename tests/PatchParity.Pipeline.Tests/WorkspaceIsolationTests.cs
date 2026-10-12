@@ -148,7 +148,7 @@ public class WorkspaceIsolationTests : IDisposable
 
         public Action? OnLaunch { get; init; }
 
-        public void LaunchDetached(string executable, IReadOnlyList<string> arguments)
+        public void LaunchDetached(string executable, IReadOnlyList<string> arguments, string? outputLog = null)
         {
             OnLaunch?.Invoke();
             Launched.Add(executable);

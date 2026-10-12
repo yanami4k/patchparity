@@ -817,7 +817,7 @@ public class DispatcherTests : IDisposable
         public List<string> RunDllDirs { get; } = new();
         public List<string> RunScenarios { get; } = new();
 
-        public void LaunchDetached(string executable, IReadOnlyList<string> arguments)
+        public void LaunchDetached(string executable, IReadOnlyList<string> arguments, string? outputLog = null)
         {
             if (ThrowOnLaunch)
             {

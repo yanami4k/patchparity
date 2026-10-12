@@ -55,7 +55,8 @@ $batches = if ($Isolate) {
 
 $outs = @()
 foreach ($batch in $batches) {
-    & $newRun -Name $batch.Run -Only $batch.Only | Out-Null
+    # new-eval-run 的提示走 Write-Host（信息流 6），Out-Null 管不到
+    & $newRun -Name $batch.Run -Only $batch.Only 6> $null | Out-Null
     $out = Join-Path $Root "e\$($batch.Run)"
     $outs += $out
     Write-Step "pigeon eval → $out"

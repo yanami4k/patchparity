@@ -393,7 +393,7 @@ public class VerificationPlanTests : IDisposable
 
         public FakeLauncher RunFails(string resultLine) { _runFailure = resultLine; return this; }
 
-        public void LaunchDetached(string executable, IReadOnlyList<string> arguments)
+        public void LaunchDetached(string executable, IReadOnlyList<string> arguments, string? outputLog = null)
         {
             if (executable.EndsWith("Verify.exe", StringComparison.Ordinal))
             {

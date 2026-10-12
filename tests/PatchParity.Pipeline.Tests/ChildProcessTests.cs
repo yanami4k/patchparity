@@ -74,13 +74,73 @@ public class ChildProcessTests : IDisposable
         Assert.Equal(FailureStage.Build, step.Failure.Stage);
     }
 
+    // ── 子进程的输出 ───────────────────────────────────────
+
+    [Fact]
+    public void 给了输出文件时子进程的两路输出都写进文件()
+    {
+        string log = Path.Combine(_root, "child.log");
+
+        new ProcessLauncher().LaunchDetached("cmd.exe", new[] { "/c", "echo to-stdout& echo to-stderr 1>&2" }, log);
+
+        // 文件在两路都读到结尾时才关闭；等到能独占打开，说明写完了
+        string text = "";
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                using var stream = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.None);
+                text = new StreamReader(stream).ReadToEnd();
+                break;
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(100);
+            }
+        }
+        Assert.Contains("to-stdout", text);
+        Assert.Contains("to-stderr", text);
+    }
+
+    [Fact]
+    public void 验证包的日志留在运行目录里不进调用方的输出()
+    {
+        // 云上实测：命令行的结论夹在几百行引擎启动日志中间
+        var launcher = new RecordingLauncher();
+        var paths = new ToolPaths { UnityExecutable = "unity", ProjectPath = Path.Combine(_root, "project"), ArtifactRoot = _root };
+        var unity = new UnityInvoker(paths, launcher);
+        string runDir = Path.Combine(_root, "run");
+
+        unity.RunScenario(Path.Combine(_root, "package"), runDir, new Scenario(), TimeSpan.Zero);
+
+        Assert.Equal(Path.Combine(runDir, "player-stdout.log"), launcher.OutputLog);
+        int logFile = launcher.Arguments.ToList().IndexOf("-logFile");
+        Assert.True(logFile >= 0);
+        Assert.Equal(Path.Combine(runDir, "player.log"), launcher.Arguments[logFile + 1]);
+    }
+
+    private sealed class RecordingLauncher : IProcessLauncher
+    {
+        public IReadOnlyList<string> Arguments { get; private set; } = Array.Empty<string>();
+        public string? OutputLog { get; private set; }
+
+        public void LaunchDetached(string executable, IReadOnlyList<string> arguments, string? outputLog = null)
+        {
+            Arguments = arguments;
+            OutputLog = outputLog;
+        }
+
+        public bool WaitForArtifact(string artifactPath, TimeSpan timeout) => false;
+    }
+
     /// <summary>写出"构建失败"的报告，日志由测试自己占着。</summary>
     private sealed class FailingBuildLauncher : IProcessLauncher
     {
         private readonly string _output;
         public FailingBuildLauncher(string output) => _output = output;
 
-        public void LaunchDetached(string executable, IReadOnlyList<string> arguments)
+        public void LaunchDetached(string executable, IReadOnlyList<string> arguments, string? outputLog = null)
         {
             Directory.CreateDirectory(_output);
             File.WriteAllText(Path.Combine(_output, "verify-build.txt"), "result=Failed\nerrors=1\n");
