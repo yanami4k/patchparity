@@ -34,6 +34,7 @@ public static class Program
                 "coverage" => Coverage(args),
                 "verify" => VerifyCommand.Run(args),
                 "judge" => JudgeCommand.Run(args),
+                "eval" => EvalCommand.Run(args),
                 _ => Unknown(args[0]),
             };
         }
@@ -166,6 +167,7 @@ public static class Program
               patchparity coverage <哈希.csv> [触及的组件,逗号分隔]
               patchparity verify --unity ... --project ... --case ...   完整验证一个改动
               patchparity judge <台账> --expect safe|dangerous|boundary  从 MCP 会话的台账判定一个改动
+              patchparity eval --tasks ... --out ... --pigeon ...        让 Agent 逐题跑一批题并判分
 
             退出码: 0 通过 / 3 不一致 / 4 自检不通过 / 2 用法错误 / 9 异常
             """);
