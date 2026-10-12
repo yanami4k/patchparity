@@ -1,0 +1,12 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/CombatHelper.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/CombatHelper.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/CombatHelper.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/CombatHelper.cs
+@@ -48,7 +48,7 @@ namespace Brawler
+ 
+             FP64 forceMag = (FP64.FromInt(basePower)
+                 + FP64.FromInt(targetChar.KnockbackPower) * FP64.FromDouble(0.01))
+-                * FP64.FromDouble(0.64);
++                * FP64.FromDouble(0.8);
+             FPVector2 force = direction * forceMag;
+ 
+             if (frame.Has<KnockbackComponent>(target))

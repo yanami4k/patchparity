@@ -1,0 +1,12 @@
+diff --git a/com.xpturn.klotho/Runtime/Deterministic/Curve/FPAnimationCurve.cs b/com.xpturn.klotho/Runtime/Deterministic/Curve/FPAnimationCurve.cs
+--- a/com.xpturn.klotho/Runtime/Deterministic/Curve/FPAnimationCurve.cs
++++ b/com.xpturn.klotho/Runtime/Deterministic/Curve/FPAnimationCurve.cs
+@@ -127,7 +127,7 @@ namespace xpTURN.Klotho.Deterministic.Curve
+             FP64 m1 = k1.inTangent * dt;
+             FP64 dp = k1.value - k0.value;
+ 
+-            FP64 a = m0 + m1 - dp - dp;
++            FP64 a = m0 + m1 - dp - dp - dp;
+             FP64 b = dp + dp + dp - m0 - m0 - m1;
+ 
+             return k0.value + t * (m0 + t * (b + t * a));

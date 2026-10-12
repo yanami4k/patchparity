@@ -24,9 +24,10 @@ if (-not (Test-Path $cli)) { throw "找不到 $cli，请先运行 setup\prepare-
 
 $out = Join-Path $Paths.Artifacts 'measure'
 New-Item -ItemType Directory -Force $out | Out-Null
-$summary = Join-Path $out 'summary.csv'
+# 第二版汇总多了"场景"与"可观测"两列，与第一版的表头不同，另起一个文件
+$summary = Join-Path $out 'summary-v2.csv'
 if (-not (Test-Path $summary)) {
-    'id,category,exit,verdict,minutes' | Out-File -Encoding utf8 $summary
+    'id,scenario,category,exit,verdict,observable,minutes' | Out-File -Encoding utf8 $summary
 }
 
 # 命令行 verify 的退出码（src/PatchParity.Cli/VerifyCommand.cs）
@@ -36,30 +37,44 @@ $manifest = Get-Content (Join-Path $PatchParityRoot 'cases\cases.json') -Raw -En
 foreach ($case in $manifest.cases) {
     if ($Ids.Count -gt 0 -and $Ids -notcontains $case.id) { continue }
 
-    Write-Step "$($case.id)（预期 $($case.category)）"
-    $arguments = @(
-        'verify',
-        '--unity', $Paths.UnityExe,
-        '--project', $Paths.Project,
-        '--repo', $Paths.VendorRepo,
-        '--artifacts', (Join-Path $out "work-$($case.id)"),
-        '--cache', $Paths.Cache,
-        '--case', (Join-Path $PatchParityRoot "cases\$($case.patch)"),
-        '--name', $case.id,
-        '--expect', $case.category
-    )
-    if (@($case.touched).Count -gt 0) { $arguments += @('--touched', (@($case.touched) -join ',')) }
+    # 场景搜索类实测两次（裁决 019）：缺省场景下应不可观测（否则不算场景搜索题），
+    # 手工构造的探测场景下要求可观测，由此得出标准答案
+    $runs = @(@{ Label = 'default'; Options = $null; Require = $false })
+    if ($case.PSObject.Properties.Name -contains 'probe' -and $case.probe) {
+        $runs += @{ Label = 'probe'; Options = $case.probe; Require = $true }
+    }
 
-    $log = Join-Path $out "$($case.id).log"
-    $started = Get-Date
-    # 直接重定向到文件：命令行以 UTF-8 输出中文，经 PowerShell 管道会按控制台代码页转码成乱码
-    $process = Start-Process -FilePath $cli -ArgumentList ($arguments | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }) `
-        -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
-    $minutes = [math]::Round(((Get-Date) - $started).TotalMinutes, 1)
-    $verdict = if ($verdicts.ContainsKey($process.ExitCode)) { $verdicts[$process.ExitCode] } else { "exit$($process.ExitCode)" }
+    foreach ($run in $runs) {
+        Write-Step "$($case.id) @ $($run.Label)（预期 $($case.category)）"
+        $arguments = @(
+            'verify',
+            '--unity', $Paths.UnityExe,
+            '--project', $Paths.Project,
+            '--repo', $Paths.VendorRepo,
+            '--artifacts', (Join-Path $out "work-$($case.id)-$($run.Label)"),
+            '--cache', $Paths.Cache,
+            '--case', (Join-Path $PatchParityRoot "cases\$($case.patch)"),
+            '--name', $case.id,
+            '--expect', $case.category
+        )
+        if (@($case.touched).Count -gt 0) { $arguments += @('--touched', (@($case.touched) -join ',')) }
+        if ($run.Options) { $arguments += @('--scenario-options', $run.Options) }
+        if ($run.Require) { $arguments += '--require-observable' }
 
-    "$($case.id),$($case.category),$($process.ExitCode),$verdict,$minutes" | Out-File -Append -Encoding utf8 $summary
-    Write-Host "  $verdict（退出码 $($process.ExitCode)），$minutes 分钟，日志 $log"
+        $log = Join-Path $out "$($case.id)-$($run.Label).log"
+        $started = Get-Date
+        # 直接重定向到文件：命令行以 UTF-8 输出中文，经 PowerShell 管道会按控制台代码页转码成乱码
+        $process = Start-Process -FilePath $cli -ArgumentList ($arguments | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }) `
+            -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+        $minutes = [math]::Round(((Get-Date) - $started).TotalMinutes, 1)
+        $verdict = if ($verdicts.ContainsKey($process.ExitCode)) { $verdicts[$process.ExitCode] } else { "exit$($process.ExitCode)" }
+
+        $text = Get-Content $log -Raw -Encoding UTF8
+        $observable = if ($text -match '可观测性: 改动在此场景下可观测') { 'yes' } elseif ($text -match '可观测性: 改动在此场景下不可观测') { 'no' } else { '' }
+
+        "$($case.id),$($run.Label),$($case.category),$($process.ExitCode),$verdict,$observable,$minutes" | Out-File -Append -Encoding utf8 $summary
+        Write-Host "  $verdict（退出码 $($process.ExitCode)），可观测 $observable，$minutes 分钟，日志 $log"
+    }
 }
 
 Write-Step "汇总 $summary"

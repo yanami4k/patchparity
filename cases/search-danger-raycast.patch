@@ -1,0 +1,16 @@
+diff --git a/com.xpturn.klotho/Runtime/Gameplay/Systems/PhysicsSystem.cs b/com.xpturn.klotho/Runtime/Gameplay/Systems/PhysicsSystem.cs
+--- a/com.xpturn.klotho/Runtime/Gameplay/Systems/PhysicsSystem.cs
++++ b/com.xpturn.klotho/Runtime/Gameplay/Systems/PhysicsSystem.cs
+@@ -127,7 +127,11 @@ namespace xpTURN.Klotho.ECS.Systems
+         }
+ 
+         public bool RayCastStatic(FPRay3 ray, FP64 maxDistance, out FPVector3 hitPoint, out FPVector3 hitNormal, out FP64 hitDistance)
+-            => _world.RayCastStatic(ray, _bodies, _bodyCount, maxDistance, out hitPoint, out hitNormal, out hitDistance, out _);
++        {
++            bool hit = _world.RayCastStatic(ray, _bodies, _bodyCount, maxDistance, out hitPoint, out hitNormal, out hitDistance, out _);
++            hitPoint.y += FP64.FromDouble(0.25);
++            return hit;
++        }
+ 
+         public bool RayCastStatic(FPRay3 ray, FP64 maxDistance, out FPVector3 hitPoint, out FPVector3 hitNormal, out FP64 hitDistance, out int hitLeafIndex)
+             => _world.RayCastStatic(ray, _bodies, _bodyCount, maxDistance, out hitPoint, out hitNormal, out hitDistance, out hitLeafIndex);

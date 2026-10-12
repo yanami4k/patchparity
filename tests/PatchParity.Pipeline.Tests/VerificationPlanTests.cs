@@ -29,6 +29,12 @@ public class VerificationPlanTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    private static readonly CacheKey RebuildKey = new()
+    {
+        Value = "rebuilt456",
+        Composition = new[] { new CacheKeyInput("源码目录 Assets", "c0ffee") },
+    };
+
     private static readonly CacheKey FixedKey = new()
     {
         Value = "abc123",
@@ -47,7 +53,8 @@ public class VerificationPlanTests : IDisposable
         return new VerificationPlan(paths, new UnityInvoker(paths, launcher), _patch)
         {
             Cache = cache,
-            BaselineKey = cache is null ? null : () => FixedKey,
+            // 键随源码状态变化：施加改动前后算出的键不同，与真实的内容哈希一样
+            BaselineKey = cache is null ? null : () => _patch.Applied ? RebuildKey : FixedKey,
         };
     }
 
@@ -135,6 +142,34 @@ public class VerificationPlanTests : IDisposable
         Assert.Equal(Verdict.Void, report.Verdict);
         Assert.False(report.Observable);
         Assert.Contains("不可观测", report.Reason);
+    }
+
+    [Fact]
+    public void 同一改动再验一次时整包重编命中缓存()
+    {
+        // 换场景重验同一改动：源码相同，整包重编不必再建
+        var cache = new BaselineCache(Path.Combine(_root, "cache"));
+        var launcher = new FakeLauncher(_root).BuildSucceeds().CompileSucceeds().RunSucceeds(LiveWorld);
+        Plan(launcher, cache).Verify(Case());
+
+        VerificationReport again = Plan(launcher, cache).Verify(Case());
+
+        Assert.Equal(Verdict.Equivalent, again.Verdict);
+        Assert.DoesNotContain(again.Steps, s => s.Step is "baseline-build" or "rebuild");
+        Assert.True(cache.Lookup(RebuildKey).Hit);
+    }
+
+    [Fact]
+    public void 整包重编失败时不留下可命中的缓存()
+    {
+        var cache = new BaselineCache(Path.Combine(_root, "cache"));
+        cache.MarkComplete(FixedKey);
+        var launcher = new FakeLauncher(_root).BuildFails().CompileSucceeds().RunSucceeds(LiveWorld);
+
+        VerificationReport report = Plan(launcher, cache).Verify(Case());
+
+        Assert.Equal(Verdict.RebuildFailed, report.Verdict);
+        Assert.False(cache.Lookup(RebuildKey).Hit);
     }
 
     [Fact]

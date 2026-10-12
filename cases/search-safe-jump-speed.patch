@@ -1,0 +1,12 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+@@ -179,7 +179,7 @@ namespace Brawler
+ 
+                 if (cmd.JumpPressed && character.IsGrounded)
+                 {
+-                    physics.RigidBody.velocity.y = _movement.JumpSpeed;
++                    physics.RigidBody.velocity.y = _movement.JumpSpeed * FP64.FromDouble(1.25);
+                     character.IsJumping = true;
+                     var jumpEvt = EventPool.Get<JumpEvent>();
+                     jumpEvt.Character = entity;

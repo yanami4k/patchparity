@@ -174,12 +174,40 @@ public sealed class VerificationPlan
                 return afterRepeat;
             }
 
-            // 五、整包重编：改动已施加，全量构建后跑同一场景
-            StepResult rebuild = _unity.BuildPlayer(rebuildDir, BuildTimeout, "rebuild");
-            steps.Add(rebuild);
-            if (Settled(evidence with { Rebuild = rebuild }) is { } afterRebuild)
+            // 五、整包重编：改动已施加，全量构建后跑同一场景。
+            // 键按施加改动后的源码计算，与母包基线的键天然不同；同一改动重复验证（如换场景再验）时命中，
+            // 省掉一次十分钟的构建——内容相同的源码构建出的包相同，复用是正确的。不同改动之间仍各建各的（裁决 010）
+            CacheLookup? rebuildLookup = Cache is not null && BaselineKey is not null ? Cache.Lookup(BaselineKey()) : null;
+            StepResult rebuild;
+            if (rebuildLookup is { Hit: true })
             {
-                return afterRebuild;
+                rebuildDir = rebuildLookup.PackageDirectory;
+                rebuild = new StepResult { Step = "rebuild", Succeeded = true, Report = "命中缓存 " + rebuildLookup.Key.Value };
+                evidence = evidence with { Rebuild = rebuild };
+            }
+            else
+            {
+                if (rebuildLookup is not null)
+                {
+                    rebuildDir = rebuildLookup.PackageDirectory;
+                }
+                rebuild = _unity.BuildPlayer(rebuildDir, BuildTimeout, "rebuild");
+                steps.Add(rebuild);
+                if (rebuildLookup is not null)
+                {
+                    if (rebuild.Succeeded)
+                    {
+                        Cache!.MarkComplete(rebuildLookup.Key);
+                    }
+                    else
+                    {
+                        Cache!.Invalidate(rebuildLookup.Key);
+                    }
+                }
+                if (Settled(evidence with { Rebuild = rebuild }) is { } afterRebuild)
+                {
+                    return afterRebuild;
+                }
             }
 
             RunResult rebuildRun = _unity.RunScenario(

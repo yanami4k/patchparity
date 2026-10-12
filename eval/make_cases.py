@@ -80,6 +80,49 @@ cases = {
          "            doc.LoadXml(\"<item scale=\\\"1\\\"/>\");\n"
          "            itemType *= int.Parse(doc.DocumentElement.GetAttribute(\"scale\"));\n"),
     ],
+    # ── 场景生成类（裁决 019）：默认场景覆盖不到，须先构造出能让改动可观测的场景 ──
+    # 默认场景里移动速度为 0、没有地面，下面这些代码都不执行
+    "search-safe-jump-speed": [
+        (B + "Systems/PlatformerCommandSystem.cs",
+         "                    physics.RigidBody.velocity.y = _movement.JumpSpeed;\n",
+         "                    physics.RigidBody.velocity.y = _movement.JumpSpeed * FP64.FromDouble(1.25);\n"),
+    ],
+    "search-safe-move-formula": [
+        (B + "Systems/PlatformerCommandSystem.cs",
+         "                physics.RigidBody.velocity.x = cmd.HorizontalAxis * speed;\n",
+         "                physics.RigidBody.velocity.x = cmd.HorizontalAxis * speed * FP64.FromDouble(1.5);\n"),
+    ],
+    "search-safe-hit-reaction": [
+        (B + "CombatHelper.cs",
+         "            targetChar.HitReactionTicks = hitReactionTicks;\n"
+         "\n"
+         "            FP64 forceMag = (FP64.FromInt(basePower)\n"
+         "                + FP64.FromInt(targetChar.KnockbackPower) * FP64.FromDouble(0.01))\n"
+         "                * FP64.FromDouble(0.64);\n",
+         "            targetChar.HitReactionTicks = hitReactionTicks;\n"
+         "\n"
+         "            FP64 forceMag = (FP64.FromInt(basePower)\n"
+         "                + FP64.FromInt(targetChar.KnockbackPower) * FP64.FromDouble(0.01))\n"
+         "                * FP64.FromDouble(0.8);\n"),
+    ],
+    # 母包里的击退衰减曲线：只有角色被击中、发生击退时才求值
+    "search-danger-curve": [
+        (R + "Deterministic/Curve/FPAnimationCurve.cs",
+         "            FP64 a = m0 + m1 - dp - dp;\n",
+         "            FP64 a = m0 + m1 - dp - dp - dp;\n"),
+    ],
+    # 母包里的静态射线检测：只有场景里有静态碰撞体（地面）时才会命中
+    "search-danger-raycast": [
+        (R + "Gameplay/Systems/PhysicsSystem.cs",
+         "        public bool RayCastStatic(FPRay3 ray, FP64 maxDistance, out FPVector3 hitPoint, out FPVector3 hitNormal, out FP64 hitDistance)\n"
+         "            => _world.RayCastStatic(ray, _bodies, _bodyCount, maxDistance, out hitPoint, out hitNormal, out hitDistance, out _);\n",
+         "        public bool RayCastStatic(FPRay3 ray, FP64 maxDistance, out FPVector3 hitPoint, out FPVector3 hitNormal, out FP64 hitDistance)\n"
+         "        {\n"
+         "            bool hit = _world.RayCastStatic(ray, _bodies, _bodyCount, maxDistance, out hitPoint, out hitNormal, out hitDistance, out _);\n"
+         "            hitPoint.y += FP64.FromDouble(0.25);\n"
+         "            return hit;\n"
+         "        }\n"),
+    ],
 }
 
 
