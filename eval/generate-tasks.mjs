@@ -4,7 +4,7 @@
 // 题面（task.md）只交代按什么顺序调哪些工具，不含预期结论；预期与改动触及的组件只写进 verify.mjs 的 judge 参数。
 // 工作树取仓库的第一个提交（只有 .gitignore）：Agent 在工作树里看不到任何用例与实测结论，题目也用不到工作树里的文件。
 //
-// 用法：node eval/generate-tasks.mjs --cli <patchparity.exe> --out <题目目录> [--cases <cases 目录>]
+// 用法：node eval/generate-tasks.mjs --cli <patchparity.exe> --out <题目目录> [--cases <cases 目录>] [--only <id 前缀>]
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -21,10 +21,11 @@ function parseArgs(argv) {
     if (flag === "--cli") args.cli = path.resolve(value);
     else if (flag === "--out") args.out = path.resolve(value);
     else if (flag === "--cases") args.cases = path.resolve(value);
+    else if (flag === "--only") args.only = value;
     else throw new Error(`未知参数 ${flag}`);
   }
   if (!args.cli || !args.out) {
-    throw new Error("用法：node eval/generate-tasks.mjs --cli <patchparity.exe> --out <题目目录> [--cases <cases 目录>]");
+    throw new Error("用法：node eval/generate-tasks.mjs --cli <patchparity.exe> --out <题目目录> [--cases <cases 目录>] [--only <id 前缀>]");
   }
   return args;
 }
@@ -174,7 +175,9 @@ function main() {
   // 每次整体重生成：清单里删掉的题不能留在目录里继续被跑
   rmSync(args.out, { recursive: true, force: true });
   const seen = new Set();
-  for (const c of manifest.cases) {
+  // --only <前缀>：只生成 id 以此开头的题，例如只跑场景搜索类时给 search-
+  const cases = args.only ? manifest.cases.filter((c) => c.id.startsWith(args.only)) : manifest.cases;
+  for (const c of cases) {
     if (!ID_PATTERN.test(c.id)) throw new Error(`题目 id 不合 Pigeon 的规则（小写字母数字与连字符，最长 24）：${c.id}`);
     if (seen.has(c.id)) throw new Error(`题目 id 重复：${c.id}`);
     seen.add(c.id);
@@ -210,7 +213,7 @@ function main() {
     writeFileSync(path.join(dir, "README.md"), readme(c));
     writeFileSync(path.join(dir, "verify.mjs"), verifyScript(args.cli, judgeArgs));
   }
-  console.log(`已生成 ${manifest.cases.length} 道题到 ${args.out}（工作树取提交 ${ref.slice(0, 7)}）`);
+  console.log(`已生成 ${cases.length} 道题到 ${args.out}（工作树取提交 ${ref.slice(0, 7)}）`);
 }
 
 main();

@@ -143,7 +143,7 @@
       "scenario": "default",
       "search": true,
       "probe": "ground=1;jump=200",
-      "note": "跳跃初速度乘以 1.25。默认场景没有地面，角色从不着地，跳跃代码不执行。probe 为实测用的手工场景，不给 Agent。类别为待实测的预期"
+      "note": "跳跃初速度乘以 1.25。默认场景没有地面，角色从不着地，跳跃代码不执行。probe 为实测用的手工场景，不给 Agent。2026-10-12 云上实测：默认场景等价但不可观测；探测场景等价且可观测"
     },
     {
       "id": "search-safe-move-formula",
@@ -153,7 +153,7 @@
       "scenario": "default",
       "search": true,
       "probe": "moveSpeed=5",
-      "note": "水平移动速度的公式乘以 1.5。默认场景移动速度为 0，乘数不起作用。probe 为实测用的手工场景，不给 Agent。类别为待实测的预期"
+      "note": "水平移动速度的公式乘以 1.5。默认场景移动速度为 0，乘数不起作用。probe 为实测用的手工场景，不给 Agent。2026-10-12 云上实测：默认场景等价但不可观测；探测场景等价且可观测"
     },
     {
       "id": "search-safe-hit-reaction",
@@ -163,7 +163,7 @@
       "scenario": "default",
       "search": true,
       "probe": "ground=1;moveSpeed=5;spawn=-1:0,1:0;attack=500;chase=1",
-      "note": "近战命中时的击退力度系数 0.64 改为 0.8。默认场景里角色不移动，几乎打不到对方。probe 为实测用的手工场景，不给 Agent。类别为待实测的预期"
+      "note": "近战命中时的击退力度系数 0.64 改为 0.8。默认场景里角色不移动，几乎打不到对方。probe 为实测用的手工场景，不给 Agent。2026-10-12 云上实测：默认场景等价但不可观测；探测场景等价且可观测"
     },
     {
       "id": "search-danger-curve",
@@ -173,7 +173,7 @@
       "scenario": "default",
       "search": true,
       "probe": "ground=1;moveSpeed=5;spawn=-1:0,1:0;attack=500;chase=1",
-      "note": "改了母包里击退衰减曲线的插值（AOT 程序集），只有发生击退时才求值；补丁带不过去而整包重编生效。probe 为实测用的手工场景，不给 Agent。类别为待实测的预期",
+      "note": "改了母包里击退衰减曲线的插值（AOT 程序集），只有发生击退时才求值；补丁带不过去而整包重编生效。probe 为实测用的手工场景，不给 Agent。2026-10-12 云上实测：默认场景判为等价（假阴性）且不可观测；探测场景不等价，首个分歧 tick 2，分歧层 Transform、PhysicsBody",
       "context": "FPAnimationCurve 在玩法里只用于 KnockbackSystem：角色被击中后，击退力按这条曲线随时间衰减。"
     },
     {
@@ -184,7 +184,7 @@
       "scenario": "default",
       "search": true,
       "probe": "ground=1",
-      "note": "改了母包里静态射线检测返回的命中点（AOT 程序集），只有场景里有地面时才会命中；补丁带不过去而整包重编生效。probe 为实测用的手工场景，不给 Agent。类别为待实测的预期",
+      "note": "改了母包里静态射线检测返回的命中点（AOT 程序集），只有场景里有地面时才会命中；补丁带不过去而整包重编生效。probe 为实测用的手工场景，不给 Agent。2026-10-12 云上实测：默认场景判为等价（假阴性）且不可观测；探测场景不等价，首个分歧 tick 2，分歧层 PhysicsBody、Character",
       "context": "这个 RayCastStatic 重载只被 GroundClampSystem 调用：每帧从角色脚下向下打射线，命中静态碰撞体（地面）时把角色放到地面上。"
     }
   ]

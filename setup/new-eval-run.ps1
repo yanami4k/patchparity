@@ -14,7 +14,10 @@ pigeon eval 把 --out 输出目录当治理根，两份 MCP 配置都从这里�
 param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[A-Za-z0-9_-]{1,16}$')]
-    [string]$Name
+    [string]$Name,
+
+    # 只生成 id 以此开头的题，例如 search- 只跑场景搜索类
+    [string]$Only = ''
 )
 
 . (Join-Path $PSScriptRoot 'common.ps1')
@@ -57,7 +60,9 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 
 # 题目目录按本机路径现场生成（含改动用例与命令行程序的绝对路径），不入库；判分由其中的 verify.mjs 调 patchparity judge
 $tasks = Join-Path $PatchParityRoot 'eval\tasks'
-Invoke-Native 'node' @((Join-Path $PatchParityRoot 'eval\generate-tasks.mjs'), '--cli', $cliExe, '--out', $tasks)
+$generate = @((Join-Path $PatchParityRoot 'eval\generate-tasks.mjs'), '--cli', $cliExe, '--out', $tasks)
+if ($Only) { $generate += @('--only', $Only) }
+Invoke-Native 'node' $generate
 
 $streamFn = Join-Path $Paths.Pigeon 'local\deepseek-stream-fn.mjs'
 $cli = Join-Path $Paths.Pigeon 'src\cli\index.ts'
