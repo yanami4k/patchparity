@@ -23,7 +23,10 @@ param(
     [string]$Only = '',
 
     # 经 setup/pigeon/deepseek-stream-fn.mjs 调用的模型；S5、S6 的结果都是 deepseek-v4-flash
-    [string]$Model = 'deepseek-v4-flash'
+    [string]$Model = 'deepseek-v4-flash',
+
+    # 推理档位。S5、S6 是在关闭思考时跑的（Pigeon 65ff318）；5e70ca2 不给档位时对这个模型取 high，行为与花费都不同
+    [string]$Thinking = 'off'
 )
 
 . (Join-Path $PSScriptRoot 'common.ps1')
@@ -70,7 +73,7 @@ $env:PATCHPARITY_DEEPSEEK_MODEL = $Model
 
 Write-Step "patchparity eval → $out"
 & $cliExe eval --tasks $tasks --out $out --mcp-config $mcpConfig --pigeon $Paths.Pigeon --stream-fn $streamFn `
-    --provider deepseek --model $Model
+    --provider deepseek --model $Model --thinking $Thinking
 # 0 全部判分通过 / 1 有题不通过：都是正常跑完；只有用法错误（2）与异常（9）才算脚本失败
 $code = $LASTEXITCODE
 if ($code -ne 0 -and $code -ne 1) { throw "patchparity eval 失败，退出码 $code" }

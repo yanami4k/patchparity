@@ -45,7 +45,7 @@ public static class EvalCommand
         {
             Console.Error.WriteLine("""
                 用法: patchparity eval --tasks <题目目录> --out <输出目录> --mcp-config <.mcp.json> --pigeon <Pigeon 目录> --stream-fn <模块>
-                                        [--provider deepseek] [--model deepseek-v4-flash] [--node node] [--only <id 前缀>]
+                                        [--provider deepseek] [--model deepseek-v4-flash] [--thinking off|...] [--node node] [--only <id 前缀>]
                 """);
             return 2;
         }
@@ -150,19 +150,30 @@ public static class EvalCommand
     /// 起 Agent 的命令行。各开关的取舍：会话检索、派 worker、联网、推送记忆、钩子一律关掉——评测要的是 Agent 只凭题面与
     /// patchparity 的工具做题；--trust-config 只对本次放行 .mcp.json 里的服务端启动定义（无人值守时不放行即开跑前报错）。
     /// </summary>
-    public static IReadOnlyList<string> AgentArguments(EvalTask task, string workspace, Options options) => new[]
+    public static IReadOnlyList<string> AgentArguments(EvalTask task, string workspace, Options options)
     {
-        Path.Combine(options.Pigeon, "src", "cli", "index.ts"), "run",
-        "--root", workspace,
-        "--stream-fn", options.StreamFn,
-        "--provider", options.Provider,
-        "--model", options.Model,
-        "--yolo", "--trust-config",
-        "--no-session-search", "--no-spawn-workers", "--no-web", "--no-pushed-memory", "--no-hooks",
-        "--max-turns", task.MaxTurns.ToString(CultureInfo.InvariantCulture),
-        "--wall-clock", task.WallClockMs.ToString(CultureInfo.InvariantCulture),
-        "--json",
-    };
+        var args = new List<string>
+        {
+            Path.Combine(options.Pigeon, "src", "cli", "index.ts"), "run",
+            "--root", workspace,
+            "--stream-fn", options.StreamFn,
+            "--provider", options.Provider,
+            "--model", options.Model,
+            "--yolo", "--trust-config",
+            "--no-session-search", "--no-spawn-workers", "--no-web", "--no-pushed-memory", "--no-hooks",
+            "--max-turns", task.MaxTurns.ToString(CultureInfo.InvariantCulture),
+            "--wall-clock", task.WallClockMs.ToString(CultureInfo.InvariantCulture),
+            "--json",
+        };
+        // 推理档位：不给时 Pigeon 按模型信息定，5e70ca2 对 deepseek-v4-flash 取 high，而 65ff318 跑 S5、S6 时是关的。
+        // 档位改变 Agent 的行为与花费，要与既往结果比较就得显式给出（云上实测，裁决 020）
+        if (options.Thinking != "")
+        {
+            args.Add("--thinking");
+            args.Add(options.Thinking);
+        }
+        return args;
+    }
 
     /// <summary>Pigeon 设置里 mcp 一节：patchparity 七个工具的风险档。</summary>
     public static JsonObject TierSettings()
@@ -287,6 +298,7 @@ public static class EvalCommand
         public string StreamFn = "";
         public string Provider = "deepseek";
         public string Model = "deepseek-v4-flash";
+        public string Thinking = "";
         public string Node = "node";
         public string Only = "";
 
@@ -309,6 +321,7 @@ public static class EvalCommand
                     case "--stream-fn": o.StreamFn = value; break;
                     case "--provider": o.Provider = value; break;
                     case "--model": o.Model = value; break;
+                    case "--thinking": o.Thinking = value; break;
                     case "--node": o.Node = value; break;
                     case "--only": o.Only = value; break;
                     default: return null;

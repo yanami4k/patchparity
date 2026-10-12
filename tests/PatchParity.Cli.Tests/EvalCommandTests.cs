@@ -126,6 +126,23 @@ public class EvalCommandTests : IDisposable
         Assert.Contains("--yolo", a);
     }
 
+    [Fact]
+    public void 给了推理档位才转给Agent()
+    {
+        // 5e70ca2 不给档位时对 deepseek-v4-flash 取 high，S5、S6 是在关闭时跑的（云上实测）
+        AddTask("safe-a");
+        AddTask("safe-b");
+        var withThinking = Passing();
+        var withoutThinking = Passing();
+
+        Eval(withThinking, "--thinking", "off", "--only", "safe-a");
+        Eval(withoutThinking, "--only", "safe-b");
+
+        List<string> a = withThinking.Specs.Single(IsAgent).Arguments.ToList();
+        Assert.Equal("off", a[a.IndexOf("--thinking") + 1]);
+        Assert.DoesNotContain("--thinking", withoutThinking.Specs.Single(IsAgent).Arguments);
+    }
+
     // ── 判分 ───────────────────────────────────────────────
 
     [Fact]
