@@ -269,6 +269,48 @@ public class CaseLedgerTests : IDisposable
     }
 
     [Fact]
+    public void 验证完成后在别的场景下补跑一次补丁不让证据作废()
+    {
+        // S6 实测：射线一题在选定场景下跑完了全部步骤，之后 Agent 又换了个场景补跑一次补丁；
+        // 证据曾以最后一次补丁运行的场景为准，落到只跑过一次补丁的场景上，判为证据不全
+        var entries = FullRun(rebuildCsv: Other);
+        entries.Add(Run("b", LedgerSteps.Baseline, "base", Patched));
+        entries.Add(Run("r-check", LedgerSteps.Rebuild, "rebuilt", Other));
+        entries.Add(Run("p3", LedgerSteps.Patched, "base", Patched, scenario: "ticks300-jump"));
+
+        (CaseEvidence evidence, string? inconsistency) = CaseLedger.ToEvidence(entries, Touched);
+        CaseDecision decision = CaseVerdict.Decide(evidence, requireObservable: true);
+
+        Assert.Null(inconsistency);
+        Assert.Equal("default", CaseLedger.ChosenScenario(entries));
+        Assert.Equal(Verdict.Divergent, decision.Verdict);
+        Assert.True(decision.Observable);
+    }
+
+    [Fact]
+    public void 两个场景都做过确定性自检时取较晚完成的那个()
+    {
+        var entries = FullRun();
+        entries.Add(Run("p3", LedgerSteps.Patched, "base", Patched, scenario: "ground"));
+        entries.Add(Run("p4", LedgerSteps.Patched, "base", Patched, scenario: "ground"));
+        // 之后在缺省场景下又补跑一次补丁：缺省场景的自检仍是先完成的那个
+        entries.Add(Run("p5", LedgerSteps.Patched, "base", Patched));
+
+        Assert.Equal("ground", CaseLedger.ChosenScenario(entries));
+    }
+
+    [Fact]
+    public void 没有场景跑过两次补丁时仍以最后一次补丁运行的场景为准()
+    {
+        var entries = FullRun();
+        entries.RemoveAt(3);
+        entries.Add(Run("p-late", LedgerSteps.Patched, "base", Patched, scenario: "ground"));
+
+        Assert.Equal("ground", CaseLedger.ChosenScenario(entries));
+        Assert.Equal(Verdict.Incomplete, Judge(entries).Verdict);
+    }
+
+    [Fact]
     public void 场景搜索后以补丁运行的场景挑选各次运行()
     {
         // Agent 先在缺省场景下试：改动不可观测；换到有地面的场景：可观测；随后在该场景下跑补丁

@@ -106,8 +106,8 @@ public sealed class CaseLedger
     }
 
     /// <summary>
-    /// 从台账还原证据。先定场景：取最后一次补丁运行的场景（还没有补丁运行时取最后一次运行的场景）——
-    /// 场景生成类题目会先在多个场景下试运行母包与整包重编，最后才在选定的场景下跑补丁（裁决 019）。
+    /// 从台账还原证据。先定场景（<see cref="ChosenScenario"/>）：场景生成类题目会先在多个场景下试运行母包与整包重编，
+    /// 最后才在选定的场景下跑补丁（裁决 019）。
     /// 再在该场景下挑出各步：最后一次母包基线构建、最后一次补丁编译、在母包基线上装该补丁的前两次运行、
     /// 最后一次整包重编及其在该场景下的首次运行、未打补丁的母包在该场景下的首次运行。
     /// 挑出的各步彼此对不上（运行用的不是这个母包、不是这个补丁）时返回不一致的原因，不勉强判定。
@@ -118,7 +118,7 @@ public sealed class CaseLedger
         LedgerEntry? baseline = entries.LastOrDefault(e => e.Step == LedgerSteps.BaselineBuild);
         LedgerEntry? compile = entries.LastOrDefault(e => e.Step == LedgerSteps.PatchCompile);
         LedgerEntry[] runs = entries.Where(e => e.Step == LedgerSteps.Run).ToArray();
-        string? scenario = (runs.LastOrDefault(e => e.RunKind == LedgerSteps.Patched) ?? runs.LastOrDefault())?.Scenario;
+        string? scenario = SelectScenario(runs);
         LedgerEntry[] inScenario = runs.Where(e => e.Scenario == scenario).ToArray();
 
         LedgerEntry[] patched = inScenario.Where(e => e.RunKind == LedgerSteps.Patched).Take(2).ToArray();
@@ -157,11 +157,34 @@ public sealed class CaseLedger
         return (evidence, inconsistency);
     }
 
-    /// <summary>证据所在的场景：与 <see cref="ToEvidence"/> 选定的一致，供报告。</summary>
-    public static string? ChosenScenario(IReadOnlyList<LedgerEntry> entries)
+    /// <summary>
+    /// 证据所在的场景，<see cref="ToEvidence"/> 据此挑选各次运行。取确定性自检最晚完成的场景，即同一场景下
+    /// 第二次补丁运行最晚的那个；没有哪个场景跑过两次补丁时，取最后一次补丁运行的场景，还没有补丁运行时取最后一次运行的场景。
+    /// 不直接取最后一次补丁运行的场景：Agent 跑完验证后可能又在别的场景下补跑一次补丁，一次完整的验证不该因此作废
+    /// （S6 实测：射线一题主验证完整，多出的一次补丁运行让证据落到只跑过一次补丁的场景上，判为证据不全）。
+    /// </summary>
+    public static string? ChosenScenario(IReadOnlyList<LedgerEntry> entries) =>
+        SelectScenario(entries.Where(e => e.Step == LedgerSteps.Run).ToArray());
+
+    private static string? SelectScenario(LedgerEntry[] runs)
     {
-        LedgerEntry[] runs = entries.Where(e => e.Step == LedgerSteps.Run).ToArray();
-        return (runs.LastOrDefault(e => e.RunKind == LedgerSteps.Patched) ?? runs.LastOrDefault())?.Scenario;
+        LedgerEntry[] patched = runs.Where(e => e.RunKind == LedgerSteps.Patched).ToArray();
+        string? paired = null;
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (LedgerEntry run in patched)
+        {
+            string key = run.Scenario ?? "";
+            seen[key] = seen.GetValueOrDefault(key) + 1;
+            if (seen[key] == 2)
+            {
+                paired = run.Scenario;
+            }
+        }
+        if (seen.Values.Any(n => n >= 2))
+        {
+            return paired;
+        }
+        return (patched.LastOrDefault() ?? runs.LastOrDefault())?.Scenario;
     }
 
     private static StepResult Step(LedgerEntry e) => new()
