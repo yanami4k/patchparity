@@ -3,7 +3,7 @@
 在一台全新的 Windows 主机上安装 patchparity 需要的全部工具链。
 
 .DESCRIPTION
-依次安装：Git、Node、VS 生成工具（MSVC，IL2CPP 构建要用）、.NET SDK、Unity Hub、Unity 编辑器与 Windows IL2CPP 模块。
+依次安装：Git、Node、Python（Inspect AI 用）、VS 生成工具（MSVC，IL2CPP 构建要用）、.NET SDK、Unity Hub、Unity 编辑器与 Windows IL2CPP 模块。
 每一项先查是否已装，已装即跳过，可以反复运行。需要管理员权限。
 
 装完之后还有一步只能手工做：打开 Unity Hub 登录并激活许可证，见 setup\README.md。
@@ -84,6 +84,22 @@ if ($Skip -notcontains 'Node') {
         Install-Exe 'msiexec.exe' @('/i', "`"$installer`"", '/qn', '/norestart') | Out-Null
         Update-SessionPath
         Write-Host "  完成：$(node --version)，npm $(npm --version)"
+    }
+}
+
+# ── Python ────────────────────────────────────────────────
+if ($Skip -notcontains 'Python') {
+    Write-Step "Python $PythonVersion（Inspect AI 用，装在 $($Paths.PythonDir)，不进系统 PATH）"
+    $current = if (Test-Path $Paths.PythonExe) { (& $Paths.PythonExe --version) } else { '' }
+    if ($current -eq "Python $PythonVersion") {
+        Write-Host "  已安装：$current"
+    } else {
+        $installer = Get-Download $Urls.Python "python-$PythonVersion-amd64.exe"
+        # 按用户安装到指定目录：不需要管理员，不改 PATH、不装启动器与文件关联
+        Install-Exe $installer @('/quiet', 'InstallAllUsers=0', "TargetDir=$($Paths.PythonDir)", 'PrependPath=0',
+            'Include_launcher=0', 'Include_test=0', 'Shortcuts=0', 'AssociateFiles=0') | Out-Null
+        if (-not (Test-Path $Paths.PythonExe)) { throw "Python 安装后仍找不到 $($Paths.PythonExe)" }
+        Write-Host "  完成：$(& $Paths.PythonExe --version)"
     }
 }
 

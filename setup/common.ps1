@@ -5,6 +5,8 @@
 #   <根>\vendor\Klotho      被测样例，锁定提交加环境补丁与注入代码
 #   <根>\pigeon             Pigeon 锁定副本
 #   <根>\tools\dotnet       .NET SDK（不进系统 PATH）
+#   <根>\tools\python       Python（不进系统 PATH），只给 Inspect AI 用
+#   <根>\inspect-venv       Inspect AI 的虚拟环境（裁决 021）
 #   <根>\Unity\<版本>       Unity 编辑器
 #   <根>\bin\mcp, bin\cli   自包含发布的 MCP 服务端与命令行
 #   <根>\artifacts          产物与母包基线缓存
@@ -34,6 +36,8 @@ $DotnetSdkVersion = '8.0.425'
 # HybridCLR：环境补丁里包清单锁定的版本，安装后写进 libil2cpp-version.txt
 $HybridClrVersion = '8.14.1'
 $NodeVersion = '24.12.0'   # Pigeon 的 package.json 要求 >=22.19.0 <25
+# Python：3.12 的最后一个带 Windows 安装包的版本；Inspect AI 要求 3.10 以上
+$PythonVersion = '3.12.10'
 $GitVersionTag = 'v2.56.0.windows.2'
 $GitInstallerName = 'Git-2.56.0.2-64-bit.exe'
 
@@ -46,6 +50,7 @@ $Urls = @{
     DotnetInstall = 'https://dot.net/v1/dotnet-install.ps1'
     VsBuildTools = 'https://aka.ms/vs/17/release/vs_BuildTools.exe'
     Git         = "https://github.com/git-for-windows/git/releases/download/$GitVersionTag/$GitInstallerName"
+    Python      = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
 }
 
 # ── 目录 ──────────────────────────────────────────────────
@@ -53,6 +58,10 @@ $Paths = @{
     Downloads  = Join-Path $Root 'downloads'
     Dotnet     = Join-Path $Root 'tools\dotnet'
     DotnetExe  = Join-Path $Root 'tools\dotnet\dotnet.exe'
+    PythonDir  = Join-Path $Root 'tools\python'
+    PythonExe  = Join-Path $Root 'tools\python\python.exe'
+    InspectVenv = Join-Path $Root 'inspect-venv'
+    InspectExe = Join-Path $Root 'inspect-venv\Scripts\inspect.exe'
     UnityDir   = Join-Path $Root "Unity\$UnityVersion"
     UnityExe   = Join-Path $Root "Unity\$UnityVersion\Editor\Unity.exe"
     VendorRepo = Join-Path $Root 'vendor\Klotho'
@@ -116,4 +125,41 @@ function Get-Download([string]$url, [string]$fileName) {
     Invoke-WebRequest -Uri $url -OutFile $partial -UseBasicParsing
     Move-Item $partial $target
     return $target
+}
+
+# 一批题的公共准备：生成题目目录、写 MCP 服务端的启动定义。run-eval.ps1 与 run-inspect.ps1 共用
+function Initialize-EvalBatch([string]$Name, [string]$Only) {
+    $cliExe = Join-Path $Paths.CliBin 'patchparity.exe'
+    $streamFn = Join-Path $Paths.Pigeon 'local\deepseek-stream-fn.mjs'
+    foreach ($required in @($Paths.McpExe, $cliExe, $Paths.UnityExe, $Paths.Project, $streamFn)) {
+        if (-not (Test-Path $required)) { throw "找不到 $required，请先运行 install-toolchain.ps1 与 prepare-workspace.ps1" }
+    }
+
+    $out = Join-Path $Root "e\$Name"
+    New-Item -ItemType Directory -Force $out | Out-Null
+
+    # MCP 服务端的启动定义，复制成每道题工作目录里的 .mcp.json。服务端的工作目录就是题目的工作目录，路径一律写绝对路径
+    $server = [ordered]@{
+        command = $Paths.McpExe
+        args    = @(
+            '--unity', $Paths.UnityExe,
+            '--project', $Paths.Project,
+            '--artifacts', $Paths.Artifacts,
+            '--repo', $Paths.VendorRepo,
+            '--cache', $Paths.Cache
+        )
+    }
+    $mcpConfig = Join-Path $out 'mcp-launch.json'
+    # 不带 BOM 的 UTF-8：PowerShell 5.1 的 Out-File 会加 BOM，Pigeon 按 JSON 解析时不认
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($mcpConfig, ([ordered]@{ mcpServers = [ordered]@{ patchparity = $server } } | ConvertTo-Json -Depth 6), $utf8)
+
+    # 题目按本机路径现场生成（含改动用例与命令行程序的绝对路径），不入库；内容是确定的，续跑时重新生成不影响已有结果
+    $tasks = Join-Path $PatchParityRoot 'eval\tasks'
+    $generate = @((Join-Path $PatchParityRoot 'eval\generate-tasks.mjs'), '--cli', $cliExe, '--out', $tasks)
+    if ($Only) { $generate += @('--only', $Only) }
+    # 输出交给控制台，不混进函数的返回值
+    Invoke-Native 'node' $generate | Out-Host
+
+    return [pscustomobject]@{ Out = $out; Tasks = $tasks; McpConfig = $mcpConfig; CliExe = $cliExe; StreamFn = $streamFn }
 }

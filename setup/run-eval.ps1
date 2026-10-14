@@ -36,44 +36,14 @@ if (-not $env:DEEPSEEK_API_KEY) { throw '当前进程的环境里没有 DEEPSEEK
 # 命令行以 UTF-8 输出中文；输出被重定向到日志时，PowerShell 默认按控制台代码页转码，日志里就成了乱码
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 
-$cliExe = Join-Path $Paths.CliBin 'patchparity.exe'
-$streamFn = Join-Path $Paths.Pigeon 'local\deepseek-stream-fn.mjs'
-foreach ($required in @($Paths.McpExe, $cliExe, $Paths.UnityExe, $Paths.Project, $streamFn)) {
-    if (-not (Test-Path $required)) { throw "找不到 $required，请先运行 install-toolchain.ps1 与 prepare-workspace.ps1" }
-}
-
-$out = Join-Path $Root "e\$Name"
-New-Item -ItemType Directory -Force $out | Out-Null
-
-# MCP 服务端的启动定义，跑题器把它复制成每道题工作目录里的 .mcp.json。
-# 服务端的工作目录就是题目的工作目录，路径一律写绝对路径
-$server = [ordered]@{
-    command = $Paths.McpExe
-    args    = @(
-        '--unity', $Paths.UnityExe,
-        '--project', $Paths.Project,
-        '--artifacts', $Paths.Artifacts,
-        '--repo', $Paths.VendorRepo,
-        '--cache', $Paths.Cache
-    )
-}
-$mcpConfig = Join-Path $out 'mcp-launch.json'
-# 不带 BOM 的 UTF-8：PowerShell 5.1 的 Out-File 会加 BOM，Pigeon 按 JSON 解析时不认
-$utf8 = New-Object System.Text.UTF8Encoding($false)
-[IO.File]::WriteAllText($mcpConfig, ([ordered]@{ mcpServers = [ordered]@{ patchparity = $server } } | ConvertTo-Json -Depth 6), $utf8)
-
-# 题目按本机路径现场生成（含改动用例与命令行程序的绝对路径），不入库；内容是确定的，续跑时重新生成不影响已有结果
-$tasks = Join-Path $PatchParityRoot 'eval\tasks'
-$generate = @((Join-Path $PatchParityRoot 'eval\generate-tasks.mjs'), '--cli', $cliExe, '--out', $tasks)
-if ($Only) { $generate += @('--only', $Only) }
-Invoke-Native 'node' $generate
+$batch = Initialize-EvalBatch -Name $Name -Only $Only
 
 # 模型由 stream-fn 模块按这个环境变量选；传给 Pigeon 的 --model 只是身份占位
 $env:PATCHPARITY_DEEPSEEK_MODEL = $Model
 
-Write-Step "patchparity eval → $out"
-& $cliExe eval --tasks $tasks --out $out --mcp-config $mcpConfig --pigeon $Paths.Pigeon --stream-fn $streamFn `
-    --provider deepseek --model $Model --thinking $Thinking
+Write-Step "patchparity eval → $($batch.Out)"
+& $batch.CliExe eval --tasks $batch.Tasks --out $batch.Out --mcp-config $batch.McpConfig --pigeon $Paths.Pigeon `
+    --stream-fn $batch.StreamFn --provider deepseek --model $Model --thinking $Thinking
 # 0 全部判分通过 / 1 有题不通过：都是正常跑完；只有用法错误（2）与异常（9）才算脚本失败
 $code = $LASTEXITCODE
 if ($code -ne 0 -and $code -ne 1) { throw "patchparity eval 失败，退出码 $code" }

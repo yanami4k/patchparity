@@ -132,6 +132,22 @@ if (-not ((Get-Content $exclude -ErrorAction SilentlyContinue) -contains 'local/
 }
 Write-Host "  Pigeon $((& git -C $pigeon log -1 --format='%h %s').Trim())"
 
+# ── 3b. Inspect AI ────────────────────────────────────────
+# 用 Inspect 组织题目、重复跑、统计与展示，Agent 仍是 Pigeon（裁决 021）
+Write-Step 'Inspect AI'
+if (-not (Test-Path $Paths.PythonExe)) {
+    Write-Host '  没有 Python，跳过（运行 install-toolchain.ps1 装上后重跑本脚本）'
+} else {
+    if (-not (Test-Path (Join-Path $Paths.InspectVenv 'Scripts\python.exe'))) {
+        Invoke-Native $Paths.PythonExe @('-m', 'venv', $Paths.InspectVenv)
+    }
+    $venvPython = Join-Path $Paths.InspectVenv 'Scripts\python.exe'
+    # 版本都锁在 requirements.txt 里；已满足时 pip 几秒即返回
+    Invoke-Native $venvPython @('-m', 'pip', 'install', '-q', '--disable-pip-version-check',
+        '-r', (Join-Path $PatchParityRoot 'eval\inspect\requirements.txt'))
+    Write-Host "  inspect_ai $((& $venvPython -c 'import inspect_ai; print(inspect_ai.__version__)'))"
+}
+
 # ── 4. HybridCLR ──────────────────────────────────────────
 if ($SkipUnity) {
     Write-Step '跳过 Unity 相关步骤（-SkipUnity）'

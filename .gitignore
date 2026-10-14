@@ -40,3 +40,7 @@ eval/tasks/
 
 # 仓库首页 README 只在本地维护，不入库
 /README.md
+
+# Python 缓存（eval/inspect）
+__pycache__/
+.pytest_cache/
