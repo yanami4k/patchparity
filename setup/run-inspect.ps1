@@ -60,24 +60,33 @@ $taskArgs = @(
 )
 if ($Only) { $taskArgs += @('-T', "only=$Only") }
 
-Write-Step "inspect eval → $logs"
-# --max-samples 1：被测工程只有一份，同一时刻只能验证一处改动（裁决 014）。--model none：Agent 由 Pigeon 自己调用模型
-& $Paths.InspectExe eval (Join-Path $PatchParityRoot 'eval\inspect\patchparity_task.py') `
-    --model none --max-samples 1 --display plain --log-dir $logs --log-format json @taskArgs
-$code = $LASTEXITCODE
-
-# 打包静态查看器。Inspect 在 Windows 上把临时目录的路径截成 \Users\...（丢了盘符），按当前盘解析：
-# 临时目录须与当前目录在同一个盘上，否则找不到刚复制的日志
-Write-Step "打包查看器 → $(Join-Path $batch.Out 'viewer')"
+# Inspect 在 Windows 上会把临时目录的路径截成 \Users\...（丢了盘符），再按当前盘解析：临时目录须与工作所在的盘一致
 $tmp = Join-Path $Root 'tmp'
 New-Item -ItemType Directory -Force $tmp | Out-Null
 $env:TEMP = $tmp
 $env:TMP = $tmp
-Push-Location $batch.Out
+
+Write-Step "inspect eval → $logs"
+# --max-samples 1：被测工程只有一份，同一时刻只能验证一处改动（裁决 014）。--model none：Agent 由 Pigeon 自己调用模型。
+# 任务文件给相对路径：Inspect 用 pathlib 的 glob 匹配任务文件，Python 3.12 不接受绝对路径的模式（云上实测）
+Push-Location $PatchParityRoot
 try {
-    & $Paths.InspectExe view bundle --log-dir logs --output-dir viewer --overwrite
+    & $Paths.InspectExe eval 'eval/inspect/patchparity_task.py' `
+        --model none --max-samples 1 --display plain --log-dir $logs --log-format json @taskArgs
+    $code = $LASTEXITCODE
 } finally {
     Pop-Location
+}
+
+# 打包静态查看器：在输出目录下用相对路径打包，临时目录已指到同一个盘
+Write-Step "打包查看器 → $(Join-Path $batch.Out 'viewer')"
+if (Test-Path $logs) {
+    Push-Location $batch.Out
+    try {
+        & $Paths.InspectExe view bundle --log-dir logs --output-dir viewer --overwrite
+    } finally {
+        Pop-Location
+    }
 }
 
 if ($code -ne 0) { throw "inspect eval 失败，退出码 $code" }
