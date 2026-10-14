@@ -191,6 +191,8 @@ public static class CaseVerdict
         ExpectedVerdict.Safe => verdict == Verdict.Equivalent,
         // 整包重编失败也算识别出危险：这类改动热更补丁装得上，却悄悄丢了母包那部分
         ExpectedVerdict.Dangerous => verdict is Verdict.Divergent or Verdict.PatchFailed or Verdict.RebuildFailed,
+        // 反例看的是可观测性而不是判定，单凭判定无从比对，由调用方按可观测性判断（裁决 022）
+        ExpectedVerdict.Unreachable => false,
         _ => measured is { } m ? verdict == m : verdict is not (Verdict.Incomplete or Verdict.Void),
     };
 

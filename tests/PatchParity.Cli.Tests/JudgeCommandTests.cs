@@ -162,6 +162,70 @@ public class JudgeCommandTests : IDisposable
         Assert.Equal("default", summary["scenario"]!.GetValue<string>());
     }
 
+    // ── 反例题（裁决 022）──────────────────────────────────
+
+    /// <summary>母包基线与整包重编各建一次，再在给定的几个场景下各跑一次；changed 里的场景两边不同。</summary>
+    private void WriteSearchLedger(int scenarios, params int[] changed)
+    {
+        string same = Path.Combine(_root, "same.csv");
+        string other = Path.Combine(_root, "other.csv");
+        File.WriteAllText(same, Csv);
+        File.WriteAllText(other, "tick,total,c:ItemComponent:count,c:ItemComponent:hash\n0,1,1,10\n1,9,1,99\n");
+        var ledger = new CaseLedger(Ledger);
+        ledger.Record(new LedgerEntry { Step = LedgerSteps.BaselineBuild, Ok = true, Package = "base" });
+        ledger.Record(new LedgerEntry { Step = LedgerSteps.PatchCompile, Ok = true, PatchName = "x" });
+        ledger.Record(new LedgerEntry { Step = LedgerSteps.RebuildBuild, Ok = true, Package = "rebuilt" });
+        for (int i = 1; i <= scenarios; i++)
+        {
+            ledger.Record(new LedgerEntry
+            {
+                Step = LedgerSteps.Run, Ok = true, RunKind = LedgerSteps.Baseline, RunName = $"baseline-{i}", Package = "base",
+                Scenario = $"s{i}", Csv = same,
+            });
+            ledger.Record(new LedgerEntry
+            {
+                Step = LedgerSteps.Run, Ok = true, RunKind = LedgerSteps.Rebuild, RunName = $"rebuild-{i}", Package = "rebuilt",
+                Scenario = $"s{i}", Csv = changed.Contains(i) ? other : same,
+            });
+        }
+    }
+
+    [Fact]
+    public void 反例题试够场景且都不可观测即相符()
+    {
+        WriteSearchLedger(3);
+
+        (int code, JsonObject summary) = Judge(Ledger, "--expect", "unreachable", "--case", "unreachable-a");
+
+        Assert.Equal(0, code);
+        Assert.Equal("unobservable", summary["verdict"]!.GetValue<string>());
+        Assert.Equal(3, summary["scenarios_tried"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void 反例题试得不够不能下结论()
+    {
+        WriteSearchLedger(2);
+
+        (int code, JsonObject summary) = Judge(Ledger, "--expect", "unreachable");
+
+        Assert.Equal(1, code);
+        Assert.Equal("insufficient", summary["verdict"]!.GetValue<string>());
+        Assert.Equal(0, Judge(Ledger, "--expect", "unreachable", "--min-scenarios", "2").Code);
+    }
+
+    [Fact]
+    public void 反例题有场景可观测即不符()
+    {
+        WriteSearchLedger(4, changed: 3);
+
+        (int code, JsonObject summary) = Judge(Ledger, "--expect", "unreachable");
+
+        Assert.Equal(1, code);
+        Assert.Equal("observable", summary["verdict"]!.GetValue<string>());
+        Assert.Equal(new[] { "s3" }, summary["observable_scenarios"]!.AsArray().Select(n => n!.GetValue<string>()));
+    }
+
     [Fact]
     public void 不符合预期时退出码为1()
     {

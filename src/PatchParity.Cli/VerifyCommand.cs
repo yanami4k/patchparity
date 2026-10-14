@@ -67,7 +67,10 @@ public static class VerifyCommand
         VerificationReport report = plan.Verify(change);
         Print(report);
 
-        bool matchesExpectation = CaseVerdict.Matches(report.Verdict, change.Expected);
+        // 反例题（裁决 022）看的是改动在这个场景下是否可观测：不可观测即相符
+        bool matchesExpectation = change.Expected == ExpectedVerdict.Unreachable
+            ? report.Observable == false
+            : CaseVerdict.Matches(report.Verdict, change.Expected);
         Console.WriteLine();
         Console.WriteLine(matchesExpectation ? "与预期相符" : "与预期不符");
         return report.Verdict switch
@@ -155,6 +158,7 @@ public static class VerifyCommand
     {
         ExpectedVerdict.Safe => "安全",
         ExpectedVerdict.Dangerous => "危险",
+        ExpectedVerdict.Unreachable => "反例（执行不到，应不可观测）",
         _ => "边界（以实测为准）",
     };
 
@@ -236,6 +240,7 @@ public static class VerifyCommand
                         {
                             "safe" => ExpectedVerdict.Safe,
                             "dangerous" => ExpectedVerdict.Dangerous,
+                            "unreachable" => ExpectedVerdict.Unreachable,
                             _ => ExpectedVerdict.Boundary,
                         };
                         break;

@@ -336,6 +336,45 @@ public class CaseLedgerTests : IDisposable
         Assert.True(decision.Observable);
     }
 
+    // ── 反例题：逐场景的可观测性（裁决 022）─────────────────
+
+    [Fact]
+    public void 逐场景比较母包与整包重编()
+    {
+        var entries = new List<LedgerEntry>
+        {
+            new() { Step = LedgerSteps.BaselineBuild, Ok = true, Package = "base" },
+            new() { Step = LedgerSteps.RebuildBuild, Ok = true, Package = "rebuilt" },
+            Run("b1", LedgerSteps.Baseline, "base", Patched, scenario: "s1"),
+            Run("r1", LedgerSteps.Rebuild, "rebuilt", Patched, scenario: "s1"),
+            Run("b2", LedgerSteps.Baseline, "base", Patched, scenario: "s2"),
+            Run("r2", LedgerSteps.Rebuild, "rebuilt", Other, scenario: "s2"),
+            // 只跑了一边的场景不算
+            Run("b3", LedgerSteps.Baseline, "base", Patched, scenario: "s3"),
+            // 在别的包上跑的不算整包重编；补丁运行不参与
+            Run("b4", LedgerSteps.Baseline, "base", Patched, scenario: "s4"),
+            Run("r4", LedgerSteps.Rebuild, "other-package", Other, scenario: "s4"),
+            Run("p4", LedgerSteps.Patched, "base", Other, scenario: "s4"),
+        };
+
+        var result = CaseLedger.ObservabilityByScenario(entries);
+
+        Assert.Equal(new[] { ("s1", false), ("s2", true) }, result);
+    }
+
+    [Fact]
+    public void 整包重编没建成时没有可比的场景()
+    {
+        var entries = new List<LedgerEntry>
+        {
+            new() { Step = LedgerSteps.BaselineBuild, Ok = true, Package = "base" },
+            new() { Step = LedgerSteps.RebuildBuild, Ok = false },
+            Run("b1", LedgerSteps.Baseline, "base", Patched, scenario: "s1"),
+        };
+
+        Assert.Empty(CaseLedger.ObservabilityByScenario(entries));
+    }
+
     [Fact]
     public void 母包自身的运行不算补丁运行也不算整包重编()
     {

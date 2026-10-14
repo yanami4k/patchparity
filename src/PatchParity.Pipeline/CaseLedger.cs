@@ -158,6 +158,38 @@ public sealed class CaseLedger
     }
 
     /// <summary>
+    /// 逐个场景看改动是否可观测：同一场景下，母包基线与整包重编各有一次成功的运行，二者逐帧不同即可观测。
+    /// 只认最后一次母包基线构建与最后一次整包重编的包；补丁运行不参与。反例题据此判定（裁决 022）。
+    /// </summary>
+    public static IReadOnlyList<(string Scenario, bool Observable)> ObservabilityByScenario(IReadOnlyList<LedgerEntry> entries)
+    {
+        string? baselinePackage = entries.LastOrDefault(e => e.Step == LedgerSteps.BaselineBuild && e.Ok)?.Package;
+        string? rebuildPackage = entries.LastOrDefault(e => e.Step == LedgerSteps.RebuildBuild && e.Ok)?.Package;
+        var result = new List<(string, bool)>();
+        if (baselinePackage is null || rebuildPackage is null)
+        {
+            return result;
+        }
+
+        bool Usable(LedgerEntry e, string kind, string package) =>
+            e.Step == LedgerSteps.Run && e.Ok && e.RunKind == kind && e.Package == package && e.Csv is not null && File.Exists(e.Csv);
+
+        foreach (string scenario in entries.Where(e => e.Step == LedgerSteps.Run && e.Scenario is not null)
+                     .Select(e => e.Scenario!).Distinct(StringComparer.Ordinal))
+        {
+            LedgerEntry? baseline = entries.FirstOrDefault(e => e.Scenario == scenario && Usable(e, LedgerSteps.Baseline, baselinePackage));
+            LedgerEntry? rebuild = entries.FirstOrDefault(e => e.Scenario == scenario && Usable(e, LedgerSteps.Rebuild, rebuildPackage));
+            if (baseline is null || rebuild is null)
+            {
+                continue;
+            }
+            bool identical = SeriesComparer.Compare(HashSeries.Load(rebuild.Csv!), HashSeries.Load(baseline.Csv!)).Identical;
+            result.Add((scenario, !identical));
+        }
+        return result;
+    }
+
+    /// <summary>
     /// 证据所在的场景，<see cref="ToEvidence"/> 据此挑选各次运行。取确定性自检最晚完成的场景，即同一场景下
     /// 第二次补丁运行最晚的那个；没有哪个场景跑过两次补丁时，取最后一次补丁运行的场景，还没有补丁运行时取最后一次运行的场景。
     /// 不直接取最后一次补丁运行的场景：Agent 跑完验证后可能又在别的场景下补跑一次补丁，一次完整的验证不该因此作废

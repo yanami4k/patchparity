@@ -13,6 +13,12 @@ public enum ExpectedVerdict
 
     /// <summary>结论以实测为准，用例里注明实测所得而非主观预期。</summary>
     Boundary,
+
+    /// <summary>
+    /// 反例：改动落在验证载体执行不到的代码上，任何场景下都不可观测（裁决 022）。
+    /// 正确的结论是"不可观测"，而不是等价或不等价。
+    /// </summary>
+    Unreachable,
 }
 
 /// <summary>

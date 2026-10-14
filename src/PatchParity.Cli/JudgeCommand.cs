@@ -20,8 +20,9 @@ public static class JudgeCommand
         if (options is null)
         {
             Console.Error.WriteLine("""
-                用法: patchparity judge <台账> --expect safe|dangerous|boundary [--require-observable]
+                用法: patchparity judge <台账> --expect safe|dangerous|boundary|unreachable [--require-observable]
                                          [--measured equivalent|divergent|patch_failed] [--touched 组件A,组件B] [--case 用例名]
+                                         [--min-scenarios 3]
                 """);
             return 2;
         }
@@ -44,6 +45,10 @@ public static class JudgeCommand
         }
 
         IReadOnlyList<LedgerEntry> entries = CaseLedger.Load(options.Ledger);
+        if (options.Expected == ExpectedVerdict.Unreachable)
+        {
+            return JudgeUnreachable(entries, options, summary);
+        }
         (CaseEvidence evidence, string? inconsistency) = CaseLedger.ToEvidence(entries, options.Touched);
         CaseDecision decision = inconsistency is null
             ? CaseVerdict.Decide(evidence, options.RequireObservable)
@@ -94,6 +99,51 @@ public static class JudgeCommand
         return matches ? 0 : 1;
     }
 
+    /// <summary>
+    /// 反例题（裁决 022）：改动落在执行不到的代码上。答对的条件是试过至少 min 个不同场景、每个场景下母包与整包重编都逐帧一致。
+    /// 任一场景可观测说明改动其实执行得到——那是出题错了，或工具出了问题，判为不符合；试得太少也不符合，不能凭一两次就下"执行不到"的结论。
+    /// </summary>
+    private static int JudgeUnreachable(IReadOnlyList<LedgerEntry> entries, Options options, JsonObject summary)
+    {
+        IReadOnlyList<(string Scenario, bool Observable)> scenarios = CaseLedger.ObservabilityByScenario(entries);
+        string[] observable = scenarios.Where(s => s.Observable).Select(s => s.Scenario).ToArray();
+        string verdict = observable.Length > 0 ? "observable"
+            : scenarios.Count < options.MinScenarios ? "insufficient"
+            : "unobservable";
+        bool matches = verdict == "unobservable";
+
+        foreach ((string scenario, bool isObservable) in scenarios)
+        {
+            Console.WriteLine($"  {(isObservable ? "可观测" : "不可观测")}  {scenario}");
+        }
+        Console.WriteLine(verdict switch
+        {
+            "observable" => $"判定: 可观测（{observable.Length} 个场景下母包与整包重编不同）",
+            "insufficient" => $"判定: 试得不够（{scenarios.Count} 个场景，至少要 {options.MinScenarios} 个）",
+            _ => $"判定: 不可观测（{scenarios.Count} 个场景下母包与整包重编都逐帧一致）",
+        });
+        Console.WriteLine(matches ? "与预期相符" : "与预期不符");
+
+        summary["verdict"] = verdict;
+        summary["matches"] = matches;
+        summary["observable"] = observable.Length > 0;
+        summary["scenarios_tried"] = scenarios.Count;
+        summary["min_scenarios"] = options.MinScenarios;
+        var list = new JsonArray();
+        foreach (string s in observable)
+        {
+            list.Add((JsonNode)s);
+        }
+        summary["observable_scenarios"] = list;
+        summary["total_seconds"] = Math.Round(entries.Sum(e => e.Seconds), 1);
+        Console.WriteLine(summary.ToJsonString(new JsonSerializerOptions
+        {
+            TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        }));
+        return matches ? 0 : 1;
+    }
+
     private static string Name(Verdict verdict) => verdict switch
     {
         Verdict.Equivalent => "equivalent",
@@ -115,6 +165,9 @@ public static class JudgeCommand
 
         /// <summary>要求改动在所选场景下可观测，场景生成类题目用（裁决 019）。</summary>
         public bool RequireObservable;
+
+        /// <summary>反例题至少要试过几个不同场景才能下"不可观测"的结论。</summary>
+        public int MinScenarios = 3;
 
         public static Options? Parse(IReadOnlyList<string> args)
         {
@@ -146,6 +199,7 @@ public static class JudgeCommand
                             "safe" => ExpectedVerdict.Safe,
                             "dangerous" => ExpectedVerdict.Dangerous,
                             "boundary" => ExpectedVerdict.Boundary,
+                            "unreachable" => ExpectedVerdict.Unreachable,
                             _ => throw new ArgumentException("未知的预期：" + value),
                         };
                         break;
@@ -164,6 +218,12 @@ public static class JudgeCommand
                         break;
                     case "--case":
                         o.Case = value;
+                        break;
+                    case "--min-scenarios":
+                        if (!int.TryParse(value, out o.MinScenarios) || o.MinScenarios < 1)
+                        {
+                            return null;
+                        }
                         break;
                     default:
                         return null;
