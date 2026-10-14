@@ -35,6 +35,7 @@ public static class Program
                 "verify" => VerifyCommand.Run(args),
                 "judge" => JudgeCommand.Run(args),
                 "eval" => EvalCommand.Run(args),
+                "search-baseline" => SearchBaselineCommand.Run(args),
                 _ => Unknown(args[0]),
             };
         }
@@ -168,6 +169,7 @@ public static class Program
               patchparity verify --unity ... --project ... --case ...   完整验证一个改动
               patchparity judge <台账> --expect safe|dangerous|boundary  从 MCP 会话的台账判定一个改动
               patchparity eval --tasks ... --out ... --pigeon ...        让 Agent 逐题跑一批题并判分
+              patchparity search-baseline --case ... --name ...          随机取场景，数几次才让改动可观测
 
             退出码: 0 通过 / 3 不一致 / 4 自检不通过 / 2 用法错误 / 9 异常
             """);
