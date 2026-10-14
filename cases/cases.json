@@ -186,6 +186,78 @@
       "probe": "ground=1",
       "note": "改了母包里静态射线检测返回的命中点（AOT 程序集），只有场景里有地面时才会命中；补丁带不过去而整包重编生效。probe 为实测用的手工场景，不给 Agent。2026-10-12 云上实测：默认场景判为等价（假阴性）且不可观测；探测场景不等价，首个分歧 tick 2，分歧层 PhysicsBody、Character",
       "context": "这个 RayCastStatic 重载只被 GroundClampSystem 调用：每帧从角色脚下向下打射线，命中静态碰撞体（地面）时把角色放到地面上。"
+    },
+    {
+      "id": "hard-safe-mage-teleport",
+      "patch": "hard-safe-mage-teleport.patch",
+      "category": "safe",
+      "touched": [],
+      "scenario": "default",
+      "search": true,
+      "probe": "ground=1;classes=1,1;skill=300",
+      "note": "多层前置条件：法师二号技能（传送）用射线找落点，落点高度加 0.25。须有法师在场、技能概率大于 0（缺省为 0，且一半按到二号技能）、有地面（射线才命中）。类别为待实测的预期。probe 为实测用的手工场景，不给 Agent。"
+    },
+    {
+      "id": "hard-safe-timeout",
+      "patch": "hard-safe-timeout.patch",
+      "category": "safe",
+      "touched": [],
+      "scenario": "default",
+      "search": true,
+      "probe": "ground=1;ticks=4900",
+      "note": "后期才显现：对局超时（120 秒即 4800 帧）时平票的胜者由编号小者改为编号大者。须打满 4800 帧，且到时至少两人命数相同还活着（有地面才不会掉落死亡）。类别为待实测的预期。probe 为实测用的手工场景，不给 Agent。"
+    },
+    {
+      "id": "hard-safe-item-expire",
+      "patch": "hard-safe-item-expire.patch",
+      "category": "safe",
+      "touched": [],
+      "scenario": "default",
+      "search": true,
+      "probe": "ticks=700",
+      "note": "后期才显现：道具过期判断由寿命 ≤0 改为 <0，晚一帧销毁。道具寿命 600 帧，第一次过期在第 600 帧，缺省的 600 帧只跑到第 599 帧。类别为待实测的预期。probe 为实测用的手工场景，不给 Agent。"
+    },
+    {
+      "id": "hard-safe-boost-pickup",
+      "patch": "hard-safe-boost-pickup.patch",
+      "category": "safe",
+      "touched": [],
+      "scenario": "default",
+      "search": true,
+      "probe": "players=4;ground=1;moveSpeed=20;ticks=6000",
+      "note": "多层且依赖随机：加速道具的倍率再乘 1.2。须有角色捡到加速道具（道具位置随机，三种类型之一），且移动速度大于 0。类别为待实测的预期。probe 为实测用的手工场景，不给 Agent。"
+    },
+    {
+      "id": "hard-danger-capsule-same",
+      "patch": "hard-danger-capsule-same.patch",
+      "category": "dangerous",
+      "touched": [],
+      "scenario": "default",
+      "search": true,
+      "probe": "spawn=0:0,0:0",
+      "note": "只在特定情形调用的框架代码：母包里两胶囊体最近点重合（距离为 0）时的接触法线由向上改为向右（AOT 程序集），补丁带不过去而整包重编生效。只有两名角色出生在同一点、轴线重合时才会走到。类别为待实测的预期。probe 为实测用的手工场景，不给 Agent。",
+      "context": "CollisionTests.CapsuleCapsule 由物理系统在每帧的窄相碰撞检测中调用：两名角色（都是竖直的胶囊体）相互接近时计算接触点与法线。"
+    },
+    {
+      "id": "hard-mixed-grav-capsule",
+      "patch": "hard-mixed-grav-capsule.patch",
+      "category": "dangerous",
+      "touched": [],
+      "scenario": "default",
+      "search": true,
+      "probe": "spawn=0:0,0:0",
+      "note": "混合补丁：重力乘 1.5（玩法代码，缺省场景即可观测，安全）加上母包里胶囊体重合时的法线（危险）。停在第一个可观测的场景（缺省场景）只验证了重力那处，会判为等价而漏掉危险。类别为待实测的预期。probe 为实测用的手工场景，不给 Agent。",
+      "context": "CollisionTests.CapsuleCapsule 由物理系统在每帧的窄相碰撞检测中调用：两名角色（都是竖直的胶囊体）相互接近时计算接触点与法线。"
+    },
+    {
+      "id": "hard-unreach-consumable",
+      "patch": "hard-unreach-consumable.patch",
+      "category": "unreachable",
+      "touched": [],
+      "scenario": "default",
+      "search": true,
+      "probe": "ground=1;moveSpeed=5;attack=500;skill=200;chase=1;ticks=1200",
+      "note": "反例：使用消耗品的修复量由 30 改为 40。这段只在收到 UseConsumable 命令时执行，验证载体从不发这个命令，任何场景下都执行不到；正确的结论是不可观测。类别为待实测的预期。probe 为实测用的手工场景，不给 Agent。"
     }
   ]
 }

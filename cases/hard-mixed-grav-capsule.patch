@@ -1,0 +1,116 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/TopdownMovementSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/TopdownMovementSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/TopdownMovementSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/TopdownMovementSystem.cs
+@@ -21,53 +21,53 @@ namespace Brawler
+         {
+             _events = events;
+         }
+ 
+         public void Update(ref Frame frame)
+         {
+             var asset = frame.AssetRegistry.Get<MovementPhysicsAsset>();
+             var dt = FP64.FromInt(frame.DeltaTimeMs) * MsToSeconds;
+ 
+             var filter = frame.Filter<TransformComponent, PhysicsBodyComponent, CharacterComponent>();
+             while (filter.Next(out var entity))
+             {
+                 ref readonly var character = ref frame.GetReadOnly<CharacterComponent>(entity);
+                 if (character.IsDead)
+                     continue;
+ 
+                 ref var transform = ref frame.Get<TransformComponent>(entity);
+                 ref var physics = ref frame.Get<PhysicsBodyComponent>(entity);
+                 ref var body = ref physics.RigidBody;
+ 
+                 var oldPos = transform.Position;
+ 
+                 // 1. Gravity / slope projection
+                 if (character.IsJumping || !character.IsGrounded)
+                 {
+                     // Jumping or airborne: apply gravity
+-                    body.velocity.y = body.velocity.y - asset.GravityAccel * dt;
++                    body.velocity.y = body.velocity.y - asset.GravityAccel * dt * FP64.FromDouble(1.5);
+                 }
+                 else if (character.GroundNormal.y < FP64.One)
+                 {
+                     // Slope: project horizontal velocity along slope direction (preserve speed)
+                     FP64 hSqr = body.velocity.x * body.velocity.x + body.velocity.z * body.velocity.z;
+                     if (hSqr > asset.MinMoveSqr)
+                     {
+                         FPVector3 hVel = new FPVector3(body.velocity.x, FP64.Zero, body.velocity.z);
+                         FPVector3 n = character.GroundNormal;
+                         FPVector3 projected = hVel - n * FPVector3.Dot(hVel, n);
+                         FP64 projSqr = projected.sqrMagnitude;
+                         if (projSqr > FP64.Epsilon)
+                         {
+                             FP64 scale = FP64.Sqrt(hSqr / projSqr);
+                             body.velocity = projected * scale;
+                         }
+                     }
+                 }
+ 
+                 // 2. Rotate toward XZ movement direction (preserve rotation while knockback or action lock is active)
+                 if (!frame.Has<KnockbackComponent>(entity) && character.ActionLockTicks <= 0)
+                 {
+                     FP64 vx = body.velocity.x;
+                     FP64 vz = body.velocity.z;
+                     if (vx * vx + vz * vz > asset.MinMoveSqr)
+                         transform.Rotation = FP64.Atan2(vx, vz);
+diff --git a/com.xpturn.klotho/Runtime/Deterministic/Physics/CollisionTests.cs b/com.xpturn.klotho/Runtime/Deterministic/Physics/CollisionTests.cs
+--- a/com.xpturn.klotho/Runtime/Deterministic/Physics/CollisionTests.cs
++++ b/com.xpturn.klotho/Runtime/Deterministic/Physics/CollisionTests.cs
+@@ -130,53 +130,53 @@ namespace xpTURN.Klotho.Deterministic.Physics
+ 
+         public static bool CapsuleCapsule(ref FPCapsuleShape ca, ref FPCapsuleShape cb, out FPContact contact)
+         {
+             FPCapsule capA = ca.ToFPCapsule();
+             FPCapsule capB = cb.ToFPCapsule();
+ 
+             ClosestPointsOnSegments(
+                 capA.pointA, capA.pointB,
+                 capB.pointA, capB.pointB,
+                 out FPVector3 closestA, out FPVector3 closestB
+             );
+ 
+             FPVector3 diff = closestB - closestA;
+             FP64 sqrDist = diff.sqrMagnitude;
+             FP64 radiusSum = ca.radius + cb.radius;
+ 
+             if (sqrDist > radiusSum * radiusSum)
+             {
+                 contact = default;
+                 return false;
+             }
+ 
+             FP64 dist = diff.magnitude;
+             FPVector3 normal;
+             if (dist == FP64.Zero)
+             {
+-                normal = FPVector3.Up;
++                normal = FPVector3.Right;
+             }
+             else
+             {
+                 normal = diff / dist;
+             }
+ 
+             FP64 depth = radiusSum - dist;
+             FPVector3 point = closestA + normal * (ca.radius - depth * FP64.Half);
+ 
+             contact = new FPContact(point, normal, depth, 0, 0);
+             return true;
+         }
+ 
+         public static bool BoxBox(ref FPBoxShape boxA, ref FPBoxShape boxB, out FPContact contact)
+         {
+             boxA.GetAxes(out FPVector3 axA0, out FPVector3 axA1, out FPVector3 axA2);
+             boxB.GetAxes(out FPVector3 axB0, out FPVector3 axB1, out FPVector3 axB2);
+ 
+             FPVector3 d = boxB.position - boxA.position;
+ 
+             Span<FPVector3> axes = stackalloc FPVector3[15];
+             axes[0] = axA0; axes[1] = axA1; axes[2] = axA2;
+             axes[3] = axB0; axes[4] = axB1; axes[5] = axB2;
+ 
+             axes[6] = FPVector3.Cross(axA0, axB0);
+             axes[7] = FPVector3.Cross(axA0, axB1);

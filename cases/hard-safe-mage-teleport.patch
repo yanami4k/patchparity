@@ -1,0 +1,70 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+@@ -326,65 +326,65 @@ namespace Brawler
+         }
+ 
+         // Mage — Skill0: (projectile planned, currently ranged impact) / Skill1: Teleport
+         FPVector2? SkillMage(ref Frame frame, EntityRef caster, PlayerInputCommand cmd, FPVector2 origin, FPVector2 aimDir)
+         {
+             if (cmd.SkillSlot == 0)
+             {
+                 var sk = _skills[1][0];
+                 FPVector2 impact = origin + aimDir * sk.MoveSpeedOrRange;
+                 return AreaHitAllEnemies(ref frame, caster, impact, sk.RangeSqr, sk.KnockbackPower, HitEffectType.HitReaction) ?? impact;
+             }
+             else
+             {
+                 var sk = _skills[1][1];
+                 FPVector2 dest = origin + aimDir * sk.MoveSpeedOrRange;
+                 ref var tMut   = ref frame.Get<TransformComponent>(caster);
+                 FP64 destY = tMut.Position.y;
+ 
+                 if (_rayCaster != null)
+                 {
+                     ref readonly var phys = ref frame.GetReadOnly<PhysicsBodyComponent>(caster);
+                     if (phys.Collider.type == ShapeType.Capsule)
+                     {
+                         FP64 halfH = phys.Collider.capsule.halfHeight;
+                         FP64 r     = phys.Collider.capsule.radius;
+                         FP64 probeHeight = _movement.MaxFallProbe;
+ 
+                         FP64 rayY     = destY + phys.ColliderOffset.y + halfH + r + probeHeight;
+                         var rayOrigin = new FPVector3(dest.x, rayY, dest.y);
+                         var downRay   = new FPRay3(rayOrigin, -FPVector3.Up);
+                         if (_rayCaster.RayCastStatic(downRay, probeHeight + probeHeight, out var hitPt, out _, out _))
+                         {
+-                            FP64 groundY = hitPt.y + halfH + r - phys.ColliderOffset.y;
++                            FP64 groundY = hitPt.y + halfH + r - phys.ColliderOffset.y + FP64.FromDouble(0.25);
+                             if (groundY > destY)
+                                 destY = groundY;
+                         }
+                     }
+                 }
+ 
+                 tMut.Position  = new FPVector3(dest.x, destY, dest.y);
+                 tMut.TeleportTick = frame.Tick;
+                 frame.RefreshPreviousTransform(caster);
+                 return null;
+             }
+         }
+ 
+         // Rogue — Skill0: Short-range dash+strike / Skill1: Thrown dagger (ranged linear hit)
+         FPVector2? SkillRogue(ref Frame frame, EntityRef caster, PlayerInputCommand cmd, FPVector2 origin, FPVector2 aimDir)
+         {
+             if (cmd.SkillSlot == 0)
+             {
+                 var sk = _skills[2][0];
+                 ref var physics = ref frame.Get<PhysicsBodyComponent>(caster);
+                 physics.RigidBody.velocity.x = aimDir.x * sk.MoveSpeedOrRange;
+                 physics.RigidBody.velocity.z = aimDir.y * sk.MoveSpeedOrRange;
+                 var dashEvt = EventPool.Get<DashEvent>();
+                 dashEvt.Character = caster;
+                 dashEvt.Direction = aimDir;
+                 _events.Enqueue(dashEvt);
+                 FPVector2 dashImpact = origin + aimDir * sk.ImpactOffsetDist;
+                 return AreaHitAllEnemies(ref frame, caster, dashImpact, sk.RangeSqr, sk.KnockbackPower, HitEffectType.HitReaction) ?? dashImpact;
+             }
+             else
+             {
+                 var sk = _skills[2][1];

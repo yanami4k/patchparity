@@ -1,0 +1,46 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/GameOverSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/GameOverSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/GameOverSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/GameOverSystem.cs
+@@ -92,41 +92,41 @@ namespace Brawler
+         // ────────────────────────────────────────────
+         // Timeout detection
+         // ────────────────────────────────────────────
+         void TryTimeoutGameOver(ref Frame frame, ref GameTimerStateComponent state)
+         {
+             var rules = frame.AssetRegistry.Get<BrawlerGameRulesAsset>();
+             int gameDurationMs = rules.GameDurationSeconds * 1000;
+ 
+             int elapsedMs = (frame.Tick - state.StartTick) * frame.DeltaTimeMs;
+             if (elapsedMs < gameDurationMs) return;
+ 
+             // Find the player with the most stocks (lower PlayerId wins on a tie)
+             int winnerPlayerId = -1;
+             int winnerStocks   = -1;
+ 
+             var filter = frame.Filter<CharacterComponent>();
+             while (filter.Next(out var entity))
+             {
+                 ref readonly var c = ref frame.GetReadOnly<CharacterComponent>(entity);
+                 if (c.StockCount > winnerStocks ||
+-                   (c.StockCount == winnerStocks && c.PlayerId < winnerPlayerId))
++                   (c.StockCount == winnerStocks && c.PlayerId > winnerPlayerId))
+                 {
+                     winnerStocks   = c.StockCount;
+                     winnerPlayerId = c.PlayerId;
+                 }
+             }
+ 
+             FireGameOver(ref frame, ref state, winnerPlayerId, ReasonTimeout);
+         }
+ 
+         void FireGameOver(ref Frame frame, ref GameTimerStateComponent state, int winnerId, FixedString32 reason)
+         {
+             state.GameOverFired = true;
+ 
+             // Persist the terminal state into the engine-read MatchEndStateComponent (its
+             // winner/reason were previously held only on the event, lost on event-buffer wipe/clear). The
+             // engine reads this for the fire-forward backstop and the Pause-grace gate. Single write point
+             // keeps it in sync with the GameOverEvent fields.
+             ref var matchEnd = ref frame.GetSingleton<MatchEndStateComponent>();
+             matchEnd.Ended          = true;
+             matchEnd.WinnerPlayerId = winnerId;

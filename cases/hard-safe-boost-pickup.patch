@@ -1,0 +1,30 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+@@ -155,25 +155,25 @@ namespace Brawler
+             ref var character = ref frame.Get<CharacterComponent>(entity);
+             if (character.IsDead) return;
+ 
+             ref var physics   = ref frame.Get<PhysicsBodyComponent>(entity);
+             ref readonly var transform = ref frame.GetReadOnly<TransformComponent>(entity);
+ 
+             int classIdx = character.CharacterClass;
+             if ((uint)classIdx >= (uint)_stats.Length) return;
+             FP64 speed = _stats[classIdx].MoveSpeed;
+ 
+             ref readonly var cooldown = ref frame.GetReadOnly<SkillCooldownComponent>(entity);
+             if (cooldown.BoostTicks > 0)
+-                speed = speed * _item.BoostSpeedMultiplier;
++                speed = speed * _item.BoostSpeedMultiplier * FP64.FromDouble(1.2);
+ 
+             character.InputMagnitude = cmd.HorizontalAxis * cmd.HorizontalAxis + cmd.VerticalAxis * cmd.VerticalAxis;
+ 
+             bool inputBlocked = frame.Has<KnockbackComponent>(entity)
+                 && frame.GetReadOnly<KnockbackComponent>(entity).BlockInput;
+             inputBlocked |= character.ActionLockTicks > 0;
+ 
+             if (!inputBlocked)
+             {
+                 physics.RigidBody.velocity.x = cmd.HorizontalAxis * speed;
+                 physics.RigidBody.velocity.z = cmd.VerticalAxis   * speed;
+ 

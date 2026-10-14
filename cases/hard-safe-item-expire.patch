@@ -1,0 +1,26 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/ItemSpawnSystem.cs
+@@ -37,21 +37,21 @@ namespace Brawler
+         // ────────────────────────────────────────────
+         // Decrement item lifetime + remove on expiry
+         // ────────────────────────────────────────────
+         void TickItemLifetimes(ref Frame frame)
+         {
+             var filter = frame.Filter<ItemComponent, TransformComponent>();
+             while (filter.Next(out var entity))
+             {
+                 ref var item = ref frame.Get<ItemComponent>(entity);
+                 item.RemainingTicks--;
+-                if (item.RemainingTicks <= 0)
++                if (item.RemainingTicks < 0)
+                     frame.DestroyEntity(entity);
+             }
+         }
+ 
+         // ────────────────────────────────────────────
+         // Spawn an item when the period is reached
+         // ────────────────────────────────────────────
+         void TrySpawnItem(ref Frame frame)
+         {
+             var config = frame.AssetRegistry.Get<ItemConfigAsset>();

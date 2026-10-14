@@ -1,0 +1,58 @@
+diff --git a/com.xpturn.klotho/Runtime/Deterministic/Physics/CollisionTests.cs b/com.xpturn.klotho/Runtime/Deterministic/Physics/CollisionTests.cs
+--- a/com.xpturn.klotho/Runtime/Deterministic/Physics/CollisionTests.cs
++++ b/com.xpturn.klotho/Runtime/Deterministic/Physics/CollisionTests.cs
+@@ -130,53 +130,53 @@ namespace xpTURN.Klotho.Deterministic.Physics
+ 
+         public static bool CapsuleCapsule(ref FPCapsuleShape ca, ref FPCapsuleShape cb, out FPContact contact)
+         {
+             FPCapsule capA = ca.ToFPCapsule();
+             FPCapsule capB = cb.ToFPCapsule();
+ 
+             ClosestPointsOnSegments(
+                 capA.pointA, capA.pointB,
+                 capB.pointA, capB.pointB,
+                 out FPVector3 closestA, out FPVector3 closestB
+             );
+ 
+             FPVector3 diff = closestB - closestA;
+             FP64 sqrDist = diff.sqrMagnitude;
+             FP64 radiusSum = ca.radius + cb.radius;
+ 
+             if (sqrDist > radiusSum * radiusSum)
+             {
+                 contact = default;
+                 return false;
+             }
+ 
+             FP64 dist = diff.magnitude;
+             FPVector3 normal;
+             if (dist == FP64.Zero)
+             {
+-                normal = FPVector3.Up;
++                normal = FPVector3.Right;
+             }
+             else
+             {
+                 normal = diff / dist;
+             }
+ 
+             FP64 depth = radiusSum - dist;
+             FPVector3 point = closestA + normal * (ca.radius - depth * FP64.Half);
+ 
+             contact = new FPContact(point, normal, depth, 0, 0);
+             return true;
+         }
+ 
+         public static bool BoxBox(ref FPBoxShape boxA, ref FPBoxShape boxB, out FPContact contact)
+         {
+             boxA.GetAxes(out FPVector3 axA0, out FPVector3 axA1, out FPVector3 axA2);
+             boxB.GetAxes(out FPVector3 axB0, out FPVector3 axB1, out FPVector3 axB2);
+ 
+             FPVector3 d = boxB.position - boxA.position;
+ 
+             Span<FPVector3> axes = stackalloc FPVector3[15];
+             axes[0] = axA0; axes[1] = axA1; axes[2] = axA2;
+             axes[3] = axB0; axes[4] = axB1; axes[5] = axB2;
+ 
+             axes[6] = FPVector3.Cross(axA0, axB0);
+             axes[7] = FPVector3.Cross(axA0, axB1);

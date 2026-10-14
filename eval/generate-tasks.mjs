@@ -32,7 +32,9 @@ function parseArgs(argv) {
 
 // id 即题目目录名与工作目录名；沿用 Pigeon 原任务格式的规则（最长 24 个字符），路径短些也好
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,23}$/;
-const CATEGORIES = { safe: "安全", dangerous: "危险", boundary: "边界" };
+const CATEGORIES = { safe: "安全", dangerous: "危险", boundary: "边界", unreachable: "反例" };
+// 反例题（裁决 022）至少要试过几个不同场景，才能下"执行不到"的结论
+const MIN_UNREACHABLE_SCENARIOS = 3;
 const MEASURED = new Set(["equivalent", "divergent", "patch_failed", "rebuild_failed"]);
 
 // 预算按 Pigeon 会话的建议（答复 Q6）：单题约 25 到 40 次工具调用，轮次留两倍余量；
@@ -80,6 +82,11 @@ function taskMarkdown(c, patchPath) {
 // 场景搜索类题面（裁决 019）：给出改动的 diff 与场景参数的来源，Agent 自己构造让改动可观测的场景。
 // 判定仍由 judge 从台账独立算出，并要求改动在选定的场景下可观测；Agent 的说法不作数（裁决 009）。
 function searchTaskMarkdown(c, patchPath, diff) {
+  // 多处改动时，母包与整包重编不同只说明至少有一处被执行到（裁决 022 的混合补丁题）
+  const hunks = diff.split("\n").filter((line) => line.startsWith("@@")).length;
+  const multiHunk = hunks > 1
+    ? `\n\n这份补丁有 ${hunks} 处改动。母包与整包重编不同只说明至少有一处被执行到；要让验证结论可靠，选的场景须让每一处改动都被执行。`
+    : "";
   return `# 为一个热更补丁构造场景并验证
 
 这个改动在缺省场景下很可能根本不被执行，在那里验证只会得到空洞的"一致"。你的任务是用 patchparity 的 MCP 工具，先构造一个让改动**可观测**的场景，再在该场景下完成补丁等价性验证。判定由工具链根据工具调用留下的记录自动给出，你不需要、也不应该自己下结论。
@@ -107,7 +114,7 @@ ${c.context ? `被改的代码在哪里被调用：${c.context}
 
 ## 什么叫可观测
 
-在同一个场景下分别运行"母包基线"（未打补丁）与"整包重编"的包，再用 compare_runs 比对二者：判定为 divergent 说明改动改变了模拟状态，即可观测；判定为 equivalent 说明改动在这个场景下没被执行到，需要换场景。缺省场景里角色移动速度为 0、场地没有地面（角色一直下落、反复死亡复活），很多玩法代码因此不执行——结合上面的 diff 想清楚改动在什么情况下才会被执行。
+在同一个场景下分别运行"母包基线"（未打补丁）与"整包重编"的包，再用 compare_runs 比对二者：判定为 divergent 说明改动改变了模拟状态，即可观测；判定为 equivalent 说明改动在这个场景下没被执行到，需要换场景。缺省场景里角色移动速度为 0、场地没有地面（角色一直下落、反复死亡复活），很多玩法代码因此不执行——结合上面的 diff 想清楚改动在什么情况下才会被执行。${multiHunk}
 
 ## 步骤
 
@@ -184,8 +191,10 @@ function main() {
     const judgeArgs = ["--expect", c.category, "--case", c.id];
     if (c.touched.length > 0) judgeArgs.push("--touched", c.touched.join(","));
     if (c.measured) judgeArgs.push("--measured", c.measured);
-    // 场景搜索类要求改动在选定的场景下可观测：这是客观的停止条件，也是判分的一部分
-    if (c.search) judgeArgs.push("--require-observable");
+    // 场景搜索类要求改动在选定的场景下可观测：这是客观的停止条件，也是判分的一部分。
+    // 反例题反过来：要试够场景且都不可观测（裁决 022）
+    if (c.category === "unreachable") judgeArgs.push("--min-scenarios", String(MIN_UNREACHABLE_SCENARIOS));
+    else if (c.search) judgeArgs.push("--require-observable");
 
     const dir = path.join(args.out, c.id);
     mkdirSync(dir, { recursive: true });

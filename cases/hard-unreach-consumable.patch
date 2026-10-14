@@ -1,0 +1,90 @@
+diff --git a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+--- a/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
++++ b/Samples/Brawler/Assets/Brawler/Scripts/ECS/Systems/PlatformerCommandSystem.cs
+@@ -886,85 +886,85 @@ namespace Brawler
+         // dedicated server the reliable-command entitlement gate also drops an unowned use before this tick
+         // — redundant with this check but harmless.
+         // ────────────────────────────────────────────
+         void HandleUseConsumable(ref Frame frame, UseConsumableCommand cmd)
+         {
+             frame.Logger?.KDebug($"[Consumable][Recv] tick={frame.Tick}, player={cmd.PlayerId}, consumableId={cmd.ConsumableId}");
+ 
+             if (!TryFindCharacter(ref frame, cmd.PlayerId, out var entity))
+             {
+                 frame.Logger?.KDebug($"[Consumable][Skip:NoCharacter] tick={frame.Tick}, player={cmd.PlayerId}");
+                 return;
+             }
+             ref var character = ref frame.Get<CharacterComponent>(entity);
+ 
+             // Idempotency + processed-marker. Advance LastConsumableUseSeq for EVERY received use (before the
+             // dead/owned checks) so it records "processed", not "applied". A reliable retry of the same use
+             // lands on a later tick with the same UseSeq → skipped here (exactly-once). Crucially, advancing
+             // on the no-effect paths (dead / unowned) too lets the issuer's handle resolve via Confirm (which
+             // observes this seq) — else an unowned use on the P2P legacy retry path would retry forever with
+             // no apply to observe. Rides the snapshot, so a rollback restores it and re-sim re-processes at
+             // the canonical tick.
+             if (cmd.UseSeq <= character.LastConsumableUseSeq)
+             {
+                 frame.Logger?.KDebug($"[Consumable][Skip:Duplicate] tick={frame.Tick}, player={cmd.PlayerId}, useSeq={cmd.UseSeq} <= last={character.LastConsumableUseSeq}");
+                 return;
+             }
+             character.LastConsumableUseSeq = cmd.UseSeq;
+ 
+             if (character.IsDead)
+             {
+                 frame.Logger?.KDebug($"[Consumable][Skip:Dead] tick={frame.Tick}, player={cmd.PlayerId}");
+                 return;
+             }
+ 
+             // Owned-consumable check: ConsumableId 100 -> bit0 (mirrors the seed namespace in BrawlerSimSetup).
+             int consumableBit = cmd.ConsumableId - 100;
+             if ((uint)consumableBit >= 32u || (character.OwnedConsumableMask & (1 << consumableBit)) == 0)
+             {
+                 frame.Logger?.KDebug($"[Consumable][Skip:NotOwned] tick={frame.Tick}, player={cmd.PlayerId}, consumableId={cmd.ConsumableId}");
+                 return;
+             }
+ 
+-            const int RepairAmount = 30;
++            const int RepairAmount = 40;
+             int before = character.KnockbackPower;
+             character.KnockbackPower = before > RepairAmount ? before - RepairAmount : 0;
+             // Repair applied — before/after lets one confirm the consumable was actually consumed (an unowned
+             // use is dropped by the authority before this point, so it never logs an Apply).
+             frame.Logger?.KInformation($"[Consumable][Apply] tick={frame.Tick}, player={cmd.PlayerId}, consumableId={cmd.ConsumableId}, knockback {before}->{character.KnockbackPower} (repair={before - character.KnockbackPower})");
+         }
+ 
+         bool TryFindCharacter(ref Frame frame, int playerId, out EntityRef result)
+         {
+             var filter = frame.Filter<OwnerComponent, CharacterComponent, PhysicsBodyComponent, TransformComponent>();
+             while (filter.Next(out var entity))
+             {
+                 ref readonly var owner = ref frame.GetReadOnly<OwnerComponent>(entity);
+                 if (owner.OwnerId != playerId) continue;
+                 result = entity;
+                 return true;
+             }
+             result = default;
+             return false;
+         }
+ 
+         // The per-player tick-0 entitlement loadout seed (written in OnInitializeWorld).
+         bool TryFindLoadoutSeed(ref Frame frame, int playerId, out LoadoutSeedComponent result)
+         {
+             var filter = frame.Filter<LoadoutSeedComponent>();
+             while (filter.Next(out var entity))
+             {
+                 ref readonly var seed = ref frame.GetReadOnly<LoadoutSeedComponent>(entity);
+                 if (seed.PlayerId != playerId) continue;
+                 result = seed;
+                 return true;
+             }
+             result = default;
+             return false;
+         }
+ 
+         FPVector2? AreaHitAllEnemies(ref Frame frame, EntityRef attacker, FPVector2 center, FP64 radiusSqr, int power, HitEffectType effectType)
+         {
+             FPVector2 posSum = FPVector2.Zero;
+             int hitCount = 0;
+             var filter = frame.Filter<CharacterComponent, TransformComponent>();
+             while (filter.Next(out var target))
