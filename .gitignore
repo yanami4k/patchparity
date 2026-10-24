@@ -38,9 +38,6 @@ notes/
 # pigeon eval 的题目目录在每台主机上由 eval/generate-tasks.mjs 现场生成，含本机绝对路径
 eval/tasks/
 
-# 仓库首页 README 只在本地维护，不入库
-/README.md
-
 # Python 缓存（eval/inspect）
 __pycache__/
 .pytest_cache/
