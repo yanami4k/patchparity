@@ -19,17 +19,11 @@ Unity HybridCLR 热更补丁的行为验证工具。当前只覆盖 Windows、Hy
 
 ## 做法
 
-```mermaid
-flowchart LR
-    src[改动后的源码] --> patch[编译热更程序集]
-    base[母包基线<br/>改动前的整包] --> runP[母包 + 补丁]
-    patch --> runP
-    src --> rebuild[整包重编 IL2CPP] --> runR[整包运行]
-    base --> runB[母包自身运行]
-    runP --> cmp[逐 tick 分层哈希]
-    runR --> cmp
-    runB --> cmp
-```
+| 运行项 | 构建方式 | 用途 |
+|---|---|---|
+| 补丁路径 | 母包基线 + 改动编译出的热更程序集 | 被测对象 |
+| 整包重编 | 改动后的源码重新构建 IL2CPP 包 | 行为对照 |
+| 母包自身 | 未打补丁的母包 | 确认改动在场景中确实改变了行为 |
 
 被测样例是 [xpTURN/Klotho](https://github.com/xpTURN/Klotho) 的 Brawler，锁定在 `e29c489`。这是定点数、固定步长的 ECS 对战游戏。注入的无头验证载体在 `injected/`，每个 tick 记录整帧哈希和 23 类组件各自的哈希。
 
